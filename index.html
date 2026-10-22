@@ -18,6 +18,7 @@
       <canvas id="overlay"></canvas>
     </div>
 
+    <div id="ui">
     <header id="hud" hidden>
       <div id="status"><span class="dot"></span><span id="status-text">Starting…</span></div>
       <p id="hint"></p>
@@ -34,6 +35,7 @@
     </footer>
 
     <div id="toast" role="status" aria-live="polite"></div>
+    </div>
 
     <section id="intro">
       <div class="card">
@@ -51,6 +53,7 @@
           <li><b>2</b> top-right corner</li>
           <li><b>3</b> bottom-left corner</li>
         </ol>
+        <button id="btn-xr" class="primary" type="button" hidden>Start AR</button>
         <button id="btn-start" class="primary" type="button">Start camera</button>
         <div class="alt-sources">
           <button id="btn-video" class="secondary" type="button">Record or pick a video</button>

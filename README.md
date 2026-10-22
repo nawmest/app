@@ -14,6 +14,16 @@ camera pose relative to it, and renders 3D animations standing on the virtual co
 
 <sub>Screenshots from the automated browser test, which uses a synthetic camera.</sub>
 
+## Two tracking modes
+
+* **WebXR (Android Chrome with ARCore, and other WebXR AR browsers).** When the phone supports it,
+  the app starts in **Start AR** mode. The phone's own AR system tracks the camera in 3D and finds
+  real surfaces, the same approach as three.js's `webxr_ar_hittest` example. Each tap is
+  hit-tested against the actual surface, so the three pins are true 3D points. The virtual QR code
+  is built from them in world space and held by an XRAnchor. This is the most stable mode.
+* **Camera tracking (iPhone, and everything else).** Safari on iPhone has no WebXR AR, so the app
+  runs its own vision tracker on the camera feed, described under *How it works*.
+
 ## Using it
 
 1. Open the app on your phone (it must be served over **HTTPS**; see below) and tap **Start camera**.
@@ -87,6 +97,7 @@ camera frame ─► downscale to ≤480px, grayscale ─► Gaussian pyramid (+ 
 src/
   main.ts            UI state machine, frame loop, layout, tapping
   camera.ts          getUserMedia + frame grabbing
+  xr.ts              WebXR mode: hit-tested pins, anchored virtual QR code
   vision/
     image.ts         grayscale, pyramids, gradients, bilinear sampling
     features.ts      Shi-Tomasi corners, tap snapping
@@ -96,6 +107,7 @@ src/
     tracker.ts       the virtual-QR planar tracker
   ar/
     plane.ts         surface tilt from the taps and from parallax, metric frame
+    qrFrame.ts       virtual QR frame from three 3D points (WebXR)
     linalg.ts        3x3 helpers, symmetric eigen-decomposition
     pose.ts          intrinsics estimate, homography -> pose
     filter.ts        One-Euro filter

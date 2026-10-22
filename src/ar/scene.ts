@@ -41,7 +41,10 @@ export class ARScene {
     0, 0, 0, 1,
   );
 
+  private readonly markerFromContent: THREE.Matrix4;
+
   constructor(canvas: HTMLCanvasElement) {
+    this.markerFromContent = this.contentFromMarker.clone().invert();
     this.renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: 'high-performance' });
     this.renderer.setClearColor(0x000000, 0);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -93,7 +96,6 @@ export class ARScene {
       new THREE.MeshBasicMaterial({ map: tex, depthTest: false, depthWrite: false, toneMapped: false }),
     );
     this.background.add(quad);
-    this.renderer.autoClear = false;
   }
 
   /** Uploads the video frame that is current right now (call when the tracker grabs it). */
@@ -122,6 +124,17 @@ export class ARScene {
       0, 0, 0, 1,
     );
     this.anchor.matrix.multiplyMatrices(this.flip, m);
+    this.anchor.matrixWorldNeedsUpdate = true;
+    this.anchor.visible = true;
+  }
+
+  /** WebXR: places the content frame directly (column-major content -> world matrix). */
+  setContentMatrix(m: ArrayLike<number> | null): void {
+    if (!m) {
+      this.anchor.visible = false;
+      return;
+    }
+    this.anchor.matrix.fromArray(Array.from(m)).multiply(this.markerFromContent);
     this.anchor.matrixWorldNeedsUpdate = true;
     this.anchor.visible = true;
   }
@@ -172,7 +185,10 @@ export class ARScene {
     } else {
       bar.opacity = 0;
     }
-    if (this.videoTexture) {
+    // In WebXR the system composites the camera image itself.
+    const drawVideo = !!this.videoTexture && !this.renderer.xr.isPresenting;
+    this.renderer.autoClear = !drawVideo;
+    if (drawVideo) {
       this.renderer.clear();
       this.renderer.render(this.background, this.backgroundCamera);
     }

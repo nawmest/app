@@ -1,6 +1,7 @@
 import './style.css';
 import { CameraError, FrameGrabber, startCamera } from './camera';
 import { startDemo, startVideoFile } from './sources';
+import { XRController, xrSupported } from './xr';
 import { ANIMATIONS } from './ar/animations';
 import { OneEuroFilter } from './ar/filter';
 import { PlaneEstimator } from './ar/plane';
@@ -12,7 +13,7 @@ import { type Pyramid, buildPyramid } from './vision/image';
 import { trackPoints } from './vision/lk';
 import { PlanarTracker } from './vision/tracker';
 
-type Mode = 'intro' | 'pinning' | 'tracking';
+type Mode = 'intro' | 'pinning' | 'tracking' | 'xr';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const video = $<HTMLVideoElement>('video');
@@ -371,7 +372,8 @@ function drawOverlay(): void {
 
 function loop(time: number): void {
   requestAnimationFrame(loop);
-  if (mode === 'intro' || video.readyState < 2) return;
+  // In WebXR the session drives rendering (XRController).
+  if (mode === 'intro' || mode === 'xr' || video.readyState < 2) return;
   // Only process frames the camera actually delivered.
   const key = video.currentTime;
   if (key !== lastFrameKey) {
@@ -391,6 +393,7 @@ async function start(source: Source): Promise<void> {
   const err = $('intro-error');
   const buttons = document.querySelectorAll<HTMLButtonElement>('#intro button');
   buttons.forEach((b) => (b.disabled = true));
+  const label = btn.textContent;
   if (source.kind === 'camera') btn.textContent = 'Starting camera…';
   err.hidden = true;
   try {
@@ -402,7 +405,7 @@ async function start(source: Source): Promise<void> {
     if (source.kind === 'camera') err.textContent += ' You can still record or pick a video, or try the demo scene.';
     err.hidden = false;
     buttons.forEach((b) => (b.disabled = false));
-    btn.textContent = 'Start camera';
+    btn.textContent = label;
     return;
   }
   try {
@@ -419,6 +422,51 @@ async function start(source: Source): Promise<void> {
   if (source.kind === 'file') toast('The video loops. Pin 3 points while it plays.', false, 3500);
 }
 
+let xr: XRController | null = null;
+
+async function startXR(): Promise<void> {
+  const btn = $<HTMLButtonElement>('btn-xr');
+  const err = $('intro-error');
+  err.hidden = true;
+  btn.disabled = true;
+  try {
+    scene ??= new ARScene(glCanvas);
+    xr ??= new XRController(scene, $('ui'), {
+      status: setStatus,
+      hint: setHint,
+      toast: (m, warn) => toast(m, warn),
+      locked: () => {
+        chips.hidden = false;
+        if (!scene?.currentAnimation) selectAnimation(savedAnimation());
+        scene?.playScan();
+      },
+      unlocked: () => (chips.hidden = true),
+      ended: () => {
+        mode = 'intro';
+        chips.hidden = true;
+        $('hud').hidden = true;
+        $('controls').hidden = true;
+        $('intro').hidden = false;
+      },
+    });
+    mode = 'xr';
+    $('intro').hidden = true;
+    $('hud').hidden = false;
+    $('controls').hidden = false;
+    btnDebug.hidden = true;
+    await xr.start();
+  } catch (e) {
+    mode = 'intro';
+    $('intro').hidden = false;
+    $('hud').hidden = true;
+    $('controls').hidden = true;
+    err.textContent = `Could not start AR (${e instanceof Error ? e.message : String(e)}). Use camera tracking instead.`;
+    err.hidden = false;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 function init(): void {
   buildChips();
   $('btn-start').addEventListener('click', () => start({ kind: 'camera' }));
@@ -431,8 +479,19 @@ function init(): void {
     if (file) start({ kind: 'file', file });
   });
   overlay.addEventListener('pointerdown', onTap);
-  btnUndo.addEventListener('click', undoPin);
-  btnReset.addEventListener('click', resetPins);
+  btnUndo.addEventListener('click', () => (mode === 'xr' ? xr?.undo() : undoPin()));
+  btnReset.addEventListener('click', () => (mode === 'xr' ? xr?.reset() : resetPins()));
+  // Taps on the controls must not also place pins in WebXR.
+  $('controls').addEventListener('beforexrselect', (e) => e.preventDefault());
+  $('btn-xr').addEventListener('click', startXR);
+  xrSupported().then((ok) => {
+    if (!ok) return;
+    // Real world tracking is available: make it the default, keep camera tracking as a fallback.
+    $('btn-xr').hidden = false;
+    const cam = $<HTMLButtonElement>('btn-start');
+    cam.className = 'secondary wide';
+    cam.textContent = 'Use camera tracking instead';
+  });
   btnBase.addEventListener('click', () => {
     showBase = !showBase;
     btnBase.classList.toggle('on', showBase);
