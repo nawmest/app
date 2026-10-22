@@ -32,6 +32,10 @@ jobs:
     if: github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch
     needs: test
     runs-on: ubuntu-latest
+    # One Pages deployment at a time: later pushes wait instead of failing.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     permissions:
       pages: write
       id-token: write
