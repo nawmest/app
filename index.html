@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#05070d" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <title>TriPoint AR</title>
+  </head>
+  <body>
+    <div id="stage">
+      <video id="video" muted playsinline autoplay></video>
+      <canvas id="gl"></canvas>
+      <canvas id="overlay"></canvas>
+    </div>
+
+    <header id="hud" hidden>
+      <div id="status"><span class="dot"></span><span id="status-text">Starting…</span></div>
+      <p id="hint"></p>
+    </header>
+
+    <footer id="controls" hidden>
+      <div id="animations" class="chips" hidden></div>
+      <div class="actions">
+        <button id="btn-undo" class="action" type="button">↶ Undo</button>
+        <button id="btn-reset" class="action" type="button">⟲ Reset</button>
+        <button id="btn-base" class="action toggle on" type="button" aria-pressed="true">▦ QR base</button>
+        <button id="btn-debug" class="action toggle" type="button" aria-pressed="false">⋯ Debug</button>
+      </div>
+    </footer>
+
+    <div id="toast" role="status" aria-live="polite"></div>
+
+    <section id="intro">
+      <div class="card">
+        <div class="logo" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </div>
+        <h1>TriPoint AR</h1>
+        <p>
+          Point your camera at a flat, textured surface — a poster, a book cover, a patterned table — and
+          <strong>tap 3 points</strong> on it. They become the three corner markers of a
+          <strong>virtual QR code</strong> that anchors AR animations in place.
+        </p>
+        <ol>
+          <li><b>1</b> top-left corner</li>
+          <li><b>2</b> top-right corner</li>
+          <li><b>3</b> bottom-left corner</li>
+        </ol>
+        <button id="btn-start" class="primary" type="button">Start camera</button>
+        <p id="intro-error" class="error" hidden></p>
+      </div>
+    </section>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

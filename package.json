@@ -1,0 +1,27 @@
+{
+  "name": "tri-point-ar",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Mobile web AR: pin 3 points on the live camera feed to create a virtual QR-code anchor and play AR animations on it.",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "e2e": "node e2e/run.mjs"
+  },
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/three": "^0.186.0",
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
+    "playwright": "^1.56.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  }
+}
