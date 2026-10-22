@@ -65,6 +65,23 @@ check(!(await page.isHidden('#results')) && shown === String(Math.round(r.heartR
 await page.screenshot({ path: join(out, '5-results.png'), fullPage: true });
 console.log(`      breathing: ${r?.respiration ? r.respiration.toFixed(1) + '/min (simulated 15)' : 'not reported'}; HRV: ${r?.hrv ? r.hrv.rmssd.toFixed(0) + ' ms' : 'withheld'}`);
 
+// Wellness insights: three tiles, each opening a details sheet; age adds training zones.
+const tiles = await page.$$eval('#results .tile', (els) => els.map((e) => `${e.querySelector('.tile-top').textContent.trim()}: ${e.querySelector('.tile-value').textContent.trim()}`));
+check(tiles.length === 3, `wellness tiles: ${tiles.join(' · ')}`);
+await page.click('#results .tile.sport');
+check(await page.isVisible('#sheet[open]'), 'tapping a tile opens its details');
+await page.fill('#age', '30');
+await page.$eval('#age', (e) => e.blur());
+check((await page.$$('#sheet .zones li')).length === 5, 'entering an age shows heart-rate zones');
+await page.waitForTimeout(400);
+await page.screenshot({ path: join(out, '6-sport-sheet.png') });
+await page.click('#sheet .sheet-close');
+check(!(await page.isVisible('#sheet[open]')), 'the details sheet closes');
+await page.click('#results .tile.stress');
+await page.waitForTimeout(400);
+await page.screenshot({ path: join(out, '7-stress-sheet.png') });
+await page.click('#sheet .sheet-close');
+
 check(errors.length === 0, `no page errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
 await browser.close();
 server.close();

@@ -3,6 +3,7 @@ import { CameraError, startFrontCamera, stopCamera } from './camera';
 import { createFaceTracker, type FaceTracker } from './face/landmarker';
 import { GUIDANCE, SCAN_SECONDS, ScanSession, type FrameState } from './scan';
 import { FxRenderer } from './ui/fx';
+import { wireInsights } from './ui/insights';
 import { drawTrend, heartRateStatus, renderResults, summaryText } from './ui/results';
 import { WaveRenderer } from './ui/wave';
 
@@ -275,6 +276,7 @@ function finish(): void {
   if (!result) return;
   const body = $('results-body');
   const trend = renderResults(body, result);
+  wireInsights(body, result);
   show('results');
   requestAnimationFrame(() => drawTrend(trend, result.trend, result.durationSec));
   $('btn-again').addEventListener('click', startScan);

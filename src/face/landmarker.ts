@@ -9,6 +9,10 @@ export interface FaceFrame {
   yaw: number;
   pitch: number;
   roll: number;
+  /** Eye closure, 0 (open) to 1 (closed), mean of both eyes (MediaPipe blendshapes). */
+  eyeClosure: number | null;
+  /** Mouth opening, 0..1 (blendshape `jawOpen`), for yawns. */
+  jawOpen: number | null;
 }
 
 /** Loads MediaPipe Face Landmarker (self-hosted runtime and model). Prefers the GPU. */
@@ -23,6 +27,7 @@ export async function createFaceTracker(): Promise<FaceTracker> {
       minFacePresenceConfidence: 0.5,
       minTrackingConfidence: 0.5,
       outputFacialTransformationMatrixes: true,
+      outputFaceBlendshapes: true,
     });
   // `?delegate=cpu` forces the CPU path (useful where the GPU is emulated, e.g. headless tests).
   const forceCpu = new URLSearchParams(location.search).get('delegate') === 'cpu';
@@ -63,7 +68,17 @@ export class FaceTracker {
       pitch = Math.atan2(m[6], m[10]);
       roll = Math.atan2(m[1], m[0]);
     }
-    return { points, yaw, pitch, roll };
+    let eyeClosure: number | null = null;
+    let jawOpen: number | null = null;
+    const shapes = res.faceBlendshapes?.[0]?.categories;
+    if (shapes) {
+      const score = (name: string) => shapes.find((c) => c.categoryName === name)?.score;
+      const l = score('eyeBlinkLeft');
+      const r = score('eyeBlinkRight');
+      if (l !== undefined && r !== undefined) eyeClosure = (l + r) / 2;
+      jawOpen = score('jawOpen') ?? null;
+    }
+    return { points, yaw, pitch, roll, eyeClosure, jawOpen };
   }
 
   close(): void {

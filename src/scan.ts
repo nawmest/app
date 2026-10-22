@@ -1,5 +1,6 @@
 import type { FaceFrame, FaceTracker } from './face/landmarker';
 import { ANCHORS, landmark } from './face/regions';
+import { EyeAnalyzer, type EyeStats } from './insights/eyes';
 import type { HrvMetrics } from './rppg/dsp';
 import { HRV_MIN_SNR, VitalsEstimator, type Vitals } from './rppg/estimator';
 import { SkinSampler } from './rppg/sampler';
@@ -43,6 +44,8 @@ export interface ScanResult {
   trend: [number, number][];
   durationSec: number;
   finishedAt: Date;
+  /** Eyelid statistics for the tiredness insight, or null without enough eye data. */
+  eyes: EyeStats | null;
 }
 
 export interface FrameState {
@@ -97,6 +100,8 @@ export class ScanSession {
   private lastFaceT = 0;
   private fps = 30;
   private faceH = 1;
+  private readonly eyes = new EyeAnalyzer();
+  private eyeFace: FaceFrame | null = null;
 
   constructor(private readonly tracker: FaceTracker) {}
 
@@ -162,6 +167,9 @@ export class ScanSession {
         if (face && sample && guidance !== 'no-face' && guidance !== 'too-far' && guidance !== 'off-center' && guidance !== 'slow') {
           const [c, fh] = [this.lastCenter!, this.faceH];
           this.estimator.push({ t, rgb: sample.rgb, motionY: c[1] / h, pose: [c[0] / fh, c[1] / fh, fh / h, face.yaw, face.pitch, face.roll] });
+          // Only freshly tracked frames: on slow devices landmarks are reused every other frame.
+          if (face.eyeClosure !== null && face !== this.eyeFace) this.eyes.push(t, face.eyeClosure, face.jawOpen ?? 0);
+          this.eyeFace = face;
           this.scanned += dt;
           if (t - this.lastEstimate > 0.25) {
             this.lastEstimate = t;
@@ -206,6 +214,7 @@ export class ScanSession {
   private startScan(): void {
     this.phase = 'scanning';
     this.estimator.reset();
+    this.eyes.reset();
     this.scanned = 0;
     this.history.length = 0;
     this.respHistory = [];
@@ -240,6 +249,7 @@ export class ScanSession {
       quality: this.qualitySum / Math.max(1, this.qualityN),
       trend: this.history.map((h) => [h.t, h.hr]),
       durationSec: SCAN_SECONDS,
+      eyes: this.eyes.stats(),
       finishedAt: new Date(),
     };
     this.phase = 'done';

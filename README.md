@@ -3,7 +3,8 @@
 An AR health check in the browser. PulseLens scans your face with the phone's **front camera**
 for 30 seconds and measures **heart rate**, **breathing rate** and, when the signal allows,
 **heart rate variability (HRV)**. The readings float beside your face in an AR overlay while a
-face-mesh scan animation runs.
+face-mesh scan animation runs. The results add three simple wellness insights: **stress**,
+**sleep** (tiredness) and **sport** (training zone, recovery, resting fitness).
 
 | Start | Results |
 | --- | --- |
@@ -73,6 +74,25 @@ front camera ─► MediaPipe Face Landmarker (478-point face mesh, on-device)
   and mesh detail, then animation rate, on slow devices, so measurement always gets the CPU
   first.
 
+### Wellness insights
+
+The results screen shows three tiles; tapping one opens a sheet with the reading, a gauge, the
+measurements behind it and a tip (`src/insights/`, `src/ui/insights.ts`).
+
+* **Stress**: under stress the heart and breathing speed up and the beat-to-beat rhythm becomes
+  more regular. The score weights HRV (RMSSD) most when it was measured, plus heart rate and
+  breathing; without HRV it is labelled a rough estimate. Right after exercise it asks you to
+  rest first rather than reading the workout as stress.
+* **Sleep**: a camera can't see how you slept, but tiredness shows in the eyes. MediaPipe's
+  eye-blink blendshapes give blink rate, blink length (time more than half closed), PERCLOS (the
+  share of time the eyes are at least 80% closed, the standard drowsiness measure in driver
+  monitoring), long closures and yawns. Thresholds adapt to each person's open-eye level.
+* **Sport**: a scan right after a workout (raised or clearly falling heart rate) shows the
+  training zone (needs your age, kept on the phone; max heart rate 208 − 0.7 × age, Tanaka 2001)
+  and how fast the heart rate is falling during the scan, a well-known fitness sign. The slope is
+  a median of pairwise slopes, checked against the first and last thirds, so a glitch can't fake
+  a fast recovery. At rest it rates fitness from the resting heart rate.
+
 ### Privacy
 
 Everything runs in the browser. Video frames are analysed on the device and never uploaded. The
@@ -121,6 +141,10 @@ when it names a newer build than the one running, the app reloads itself between
 phones keep tabs open and GitHub Pages lets browsers cache the page.
 
 ### Tests
+
+* `tests/eyes.test.ts`: blink rate and length, drooping lids, yawns, long closures, a raised
+  open-eye level, and the closed-eyes and slow-camera flags. `tests/insights.test.ts`: the
+  stress, sleep and sport assessments, after-exercise detection and the recovery slope.
 
 * `tests/rppg.test.ts` simulates the mean skin colour of a face: a realistic pulse wave with
   beat-to-beat variability, breathing, lighting flicker, noise and jittery frame timing. It checks

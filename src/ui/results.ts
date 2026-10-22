@@ -1,4 +1,6 @@
 import type { ScanResult } from '../scan';
+import { isAfterExercise } from '../insights/insights';
+import { insightsHtml, insightsText } from './insights';
 
 interface Status {
   text: string;
@@ -59,11 +61,13 @@ export function renderResults(root: HTMLElement, r: ScanResult): HTMLCanvasEleme
     <section class="panel hero">
       <div class="panel-title"><span class="heart-ico" style="color:var(--hr)"></span>Heart rate</div>
       <div class="big"><span class="num">${hr}</span><span class="unit">bpm</span></div>
-      ${pill(heartRateStatus(hr))}
+      ${pill(isAfterExercise(r) && hr > 100 ? { text: 'Raised from activity', tone: 'muted' } : heartRateStatus(hr))}
       ${rangeBar(hr, 40, 140, 60, 100, 'var(--hr)')}
       <canvas id="trend" aria-label="Heart rate during the scan"></canvas>
       <p class="mini-note">Varied between ${Math.round(r.heartRateRange[0])} and ${Math.round(r.heartRateRange[1])} bpm over the last 15 seconds.</p>
     </section>
+
+    ${insightsHtml(r)}
 
     <div class="grid2">
       <section class="panel">
@@ -167,6 +171,7 @@ export function summaryText(r: ScanResult): string {
     `Heart rate: ${Math.round(r.heartRate)} bpm`,
     `Breathing: ${r.respiration ? `${Math.round(r.respiration)} breaths/min` : 'not measured'}`,
     `HRV (RMSSD): ${r.hrv ? `${Math.round(r.hrv.rmssd)} ms` : 'not measured'}`,
+    ...insightsText(r),
     `Signal quality: ${Math.round(r.quality * 100)}%`,
     'Camera-based estimate for wellness only, not a medical measurement.',
     `PulseLens ${__BUILD__}`,
