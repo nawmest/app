@@ -11,7 +11,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "e2e": "node e2e/run.mjs",
-    "build:artifact": "npm run build && node scripts/build-artifact.mjs"
+    "build:artifact": "npm run build && node scripts/build-artifact.mjs",
+    "e2e:3d": "node e2e/run-3d.mjs"
   },
   "dependencies": {
     "three": "^0.186.1"

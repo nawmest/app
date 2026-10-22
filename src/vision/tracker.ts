@@ -274,7 +274,7 @@ export class PlanarTracker {
     }
     // Remember how the pins look from the current viewpoint: after losing the target, the user
     // most likely comes back to about where it was lost.
-    if (this.frame - this.lastCapture >= 15 && fit.inlierCount >= 20) {
+    if (this.frame - this.lastCapture >= 8 && fit.inlierCount >= 20) {
       this.lastCapture = this.frame;
       const pins = [...applyH(fit.H, 0, 0), ...applyH(fit.H, 1, 0), ...applyH(fit.H, 0, 1)];
       const recent = this.captureTemplates(next, pins, fit.H);

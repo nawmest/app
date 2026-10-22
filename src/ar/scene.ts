@@ -28,7 +28,11 @@ export class ARScene {
   private animationId = '';
   private appearStart = 0;
   private scanStart = -10;
-  private readonly clock = new THREE.Clock();
+  private readonly timer = new THREE.Timer();
+  /** Camera image drawn as the first layer, updated only with frames the tracker analysed. */
+  private readonly background = new THREE.Scene();
+  private readonly backgroundCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  private videoTexture: THREE.Texture | null = null;
   private readonly flip = new THREE.Matrix4().makeScale(1, -1, -1);
   private readonly contentFromMarker = new THREE.Matrix4().set(
     1, 0, 0, 0.5,
@@ -79,6 +83,24 @@ export class ARScene {
     this.content.add(this.base, sun, sun.target);
   }
 
+  setVideo(video: HTMLVideoElement): void {
+    if (this.videoTexture) return;
+    const tex = new THREE.VideoTexture(video);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    this.videoTexture = tex;
+    const quad = new THREE.Mesh(
+      new THREE.PlaneGeometry(2, 2),
+      new THREE.MeshBasicMaterial({ map: tex, depthTest: false, depthWrite: false, toneMapped: false }),
+    );
+    this.background.add(quad);
+    this.renderer.autoClear = false;
+  }
+
+  /** Uploads the video frame that is current right now (call when the tracker grabs it). */
+  markVideoFrame(): void {
+    if (this.videoTexture) this.videoTexture.needsUpdate = true;
+  }
+
   /** Sizes the canvas (CSS pixels) and sets the projection from the tracker intrinsics. */
   configure(cssWidth: number, cssHeight: number, K: Intrinsics): void {
     this.renderer.setSize(cssWidth, cssHeight, false);
@@ -119,7 +141,7 @@ export class ARScene {
     if (!def) return;
     this.animation = def.create();
     this.content.add(this.animation.object);
-    this.appearStart = this.clock.getElapsedTime();
+    this.appearStart = this.timer.getElapsed();
   }
 
   setBaseVisible(visible: boolean): void {
@@ -128,13 +150,14 @@ export class ARScene {
 
   /** Plays the "scan" sweep over the virtual QR code (on lock / relocalization). */
   playScan(): void {
-    this.scanStart = this.clock.getElapsedTime();
+    this.scanStart = this.timer.getElapsed();
     this.appearStart = this.scanStart;
   }
 
   render(): void {
-    const dt = Math.min(this.clock.getDelta(), 0.1);
-    const t = this.clock.getElapsedTime();
+    this.timer.update();
+    const dt = Math.min(this.timer.getDelta(), 0.1);
+    const t = this.timer.getElapsed();
     const k = Math.min(1, (t - this.appearStart) / 0.8);
     const s = Math.max(0.001, easeOutBack(k));
     if (this.animation) {
@@ -148,6 +171,10 @@ export class ARScene {
       bar.opacity = Math.sin(sp * Math.PI) * 0.8;
     } else {
       bar.opacity = 0;
+    }
+    if (this.videoTexture) {
+      this.renderer.clear();
+      this.renderer.render(this.background, this.backgroundCamera);
     }
     this.renderer.render(this.scene, this.camera);
   }

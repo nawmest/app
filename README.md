@@ -18,12 +18,16 @@ camera pose relative to it, and renders 3D animations standing on the virtual co
 
 1. Open the app on your phone (it must be served over **HTTPS**; see below) and tap **Start camera**.
 2. Aim at something flat with some texture: a poster, a book cover, a magazine, a patterned rug.
-3. Tap the **top-left**, **top-right** and **bottom-left** corners of where the virtual code should be.
-   Each tap snaps to the strongest nearby corner, so it can be tracked. Pins you already placed stay
-   glued to the scene while you aim for the next one.
+3. Tap the **top-left**, **top-right** and **bottom-left** corners of a square lying on the surface,
+   where the virtual code should be. The perspective of that square tells the app how the surface
+   is tilted, so content stands up from it in 3D right away. Each pin is tracked from the strongest
+   corner near your tap, and pins you already placed stay glued to the scene while you aim for the
+   next one.
 4. When the third pin goes down, the virtual QR code locks on and an animation appears. Pick another
    one from the bar at the bottom: **Hologram, QR Wave, Fountain, Solar, Fireworks**.
-5. Move around: the content stays put. If you look away, the status turns red ("Target lost").
+5. Move around: the content stays put. Moving the phone sideways around the spot measures the
+   surface's real 3D orientation from parallax (status shows "3D locked"), which also corrects taps
+   that were not quite a square. If you look away, the status turns red ("Target lost").
    Point back at the spot and it is found again automatically. **Reset** starts over, **Undo**
    removes the last pin, **QR base** toggles the virtual code overlay, **Debug** shows tracked points.
 
@@ -65,10 +69,19 @@ camera frame ─► downscale to ≤480px, grayscale ─► Gaussian pyramid (+ 
   good frame rather than the previous one, so the tracker never latches onto unrelated content.
   After a few failed frames the target is *lost*, and a coarse-to-fine NCC template search for the
   three pins runs over the whole frame. It uses both the lock-time appearance and a recent view.
+* **Depth** (`src/ar/plane.ts`): the tracker's homography is 2D. To place 3D content, the app
+  needs the surface's orientation in the camera frame at lock time. It first takes the three taps
+  as corners of a square and solves for the tilt that makes them one (a P3P-style problem with a
+  "far side of the surface is at the top of the image" tie-break). Then, as the camera moves, it
+  decomposes the homography between the lock frame and the current frame into rotation,
+  translation and plane normal. Each frame gives two candidate normals: the true one is the same
+  in every frame, and the false one moves with the camera. The app keeps the normal most frames
+  agree on. With the normal known, the taps are back-projected to 3D and a metric frame is built
+  on the surface, so every later pose is geometrically exact rather than a 2D approximation.
 * **Pose** (`src/ar/pose.ts`): `H ~ K [r1 r2 t]` is decomposed with an assumed ~67° field of view
-  across the long side (typical for phone main cameras) and orthonormalized. The Three.js camera
-  uses the same intrinsics, and the WebGL canvas covers exactly the video frame, so the content
-  lines up with the pins.
+  across the long side (typical for phone main cameras). The Three.js camera uses the same
+  intrinsics, and the camera image is drawn as the first layer of the same WebGL frame, using the
+  frame the tracker analysed, so content never lags behind the picture.
 
 ```
 src/
@@ -82,6 +95,8 @@ src/
     ncc.ts           template matching for relocalization
     tracker.ts       the virtual-QR planar tracker
   ar/
+    plane.ts         surface tilt from the taps and from parallax, metric frame
+    linalg.ts        3x3 helpers, symmetric eigen-decomposition
     pose.ts          intrinsics estimate, homography -> pose
     filter.ts        One-Euro filter
     scene.ts         Three.js renderer, anchor, virtual QR base, scan effect
@@ -97,6 +112,7 @@ npm run dev        # HTTPS dev server on your LAN (self-signed cert) -> open htt
 npm test           # unit tests: homography, LK, tracker on synthetic sequences, pose, filter
 npm run build      # production build in dist/
 npm run e2e        # browser test with a synthetic camera (needs `npm run build` and Playwright's Chromium)
+npm run e2e:3d     # 3D accuracy test: WebGL camera orbiting a poster on a table
 ```
 
 The phone must accept the self-signed certificate warning on first visit. Camera access only
@@ -122,10 +138,18 @@ animation, and checks that the tracked pins stay within ~3 px (at processing res
 where they really are. It then looks away to a different scene and back, checking that the
 target is reported lost and relocalized. Screenshots are written to `test-output/`.
 
+### 3D accuracy test
+
+`e2e/fake-camera-3d.js` renders a poster lying on a table with WebGL in true perspective, and
+`e2e/run-3d.mjs` orbits the camera around it. It measures where 3D content floating above the
+virtual code is drawn compared with where it really is. With square taps the error stays under
+0.5% of the screen width while orbiting, even one code-width above the surface. With deliberately
+sloppy taps, the initial tilt is ~50° off, and after moving the camera the error drops to under 2%.
+
 ## Limitations
 
 * The surface must be roughly planar and textured. Plain white walls cannot be tracked.
 * The focal length is estimated, not calibrated. Poses are visually consistent but not metric.
-* At lock time the code's shape is taken as seen (affine), so taps on a strongly slanted surface
-  give a slightly skewed virtual code.
+* Until you move the phone, depth comes from treating the taps as a square. If they aren't one, the
+  tilt is off until a sideways movement measures it.
 * Relocalization works best when you come back to a similar viewpoint as where tracking was lost.

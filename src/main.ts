@@ -3,7 +3,8 @@ import { CameraError, FrameGrabber, startCamera } from './camera';
 import { startDemo, startVideoFile } from './sources';
 import { ANIMATIONS } from './ar/animations';
 import { OneEuroFilter } from './ar/filter';
-import { type Intrinsics, estimateIntrinsics, poseFromHomography } from './ar/pose';
+import { PlaneEstimator } from './ar/plane';
+import { type Intrinsics, type Pose, estimateIntrinsics, poseFromHomography, projectPoint } from './ar/pose';
 import { ARScene } from './ar/scene';
 import { snapToCorner } from './vision/features';
 import { type Mat3, homographyFrom4, markerQuad } from './vision/homography';
@@ -41,9 +42,15 @@ let curPyr: Pyramid | null = null;
 /** Pinned points in processing pixels (flat xy) and whether each one is currently tracked. */
 let pins: number[] = [];
 let pinOk: boolean[] = [];
+/** Where each pin was actually tapped, relative to its snapped (trackable) position. */
+let tapOffsets: number[] = [];
 let tracker = new PlanarTracker();
-const cornerFilter = new OneEuroFilter(8, 1.5, 0.015);
+// Smooths jitter when the phone is still, follows quickly when it moves.
+const cornerFilter = new OneEuroFilter(8, 1.5, 0.04);
 let smoothH: Mat3 | null = null;
+/** 3D structure of the pinned surface (tilt from the taps, refined from parallax). */
+let plane: PlaneEstimator | null = null;
+let lastPose: Pose | null = null;
 let showDebug = false;
 let showBase = true;
 let lastFrameKey = -1;
@@ -76,7 +83,7 @@ function updatePinningUI(): void {
   setStatus('pinning', `Pin ${Math.min(n + 1, 3)} of 3`);
   setHint(
     n < 3
-      ? `Tap the <b>${PIN_NAMES[n]}</b> corner (point ${n + 1}) of your virtual QR code`
+      ? `Tap the <b>${PIN_NAMES[n]}</b> corner (point ${n + 1}) of a square on the surface`
       : 'Locking…',
   );
   btnUndo.disabled = n === 0;
@@ -157,9 +164,12 @@ function layout(): void {
 function resetPins(): void {
   pins = [];
   pinOk = [];
+  tapOffsets = [];
   tracker.reset();
   cornerFilter.reset();
   smoothH = null;
+  plane = null;
+  lastPose = null;
   scene?.setPose(null);
   mode = 'pinning';
   chips.hidden = true;
@@ -172,11 +182,14 @@ function undoPin(): void {
     tracker.reset();
     scene?.setPose(null);
     smoothH = null;
+    plane = null;
+    lastPose = null;
     cornerFilter.reset();
     mode = 'pinning';
     chips.hidden = true;
   }
   pins.splice(-2, 2);
+  tapOffsets.splice(-2, 2);
   pinOk.pop();
   updatePinningUI();
 }
@@ -188,6 +201,7 @@ function onTap(ev: PointerEvent): void {
   if (x < 0 || y < 0 || x >= grabber.width || y >= grabber.height) return;
   const snap = snapToCorner(curPyr[0], x, y, SNAP_RADIUS, 4);
   pins.push(snap.x, snap.y);
+  tapOffsets.push(x - snap.x, y - snap.y);
   pinOk.push(true);
   if (!snap.snapped) toast('Low detail at that spot — pick a sharp corner or high-contrast spot for steadier tracking.', true);
   if (navigator.vibrate) navigator.vibrate(15);
@@ -204,6 +218,7 @@ function lock(): void {
   if (minSide < diag * 0.06 || Math.abs(cross) < (diag * diag) * 0.004) {
     toast('Those points are too close together or in a line — spread them out.', true);
     pins.splice(-2, 2);
+    tapOffsets.splice(-2, 2);
     pinOk.pop();
     updatePinningUI();
     return;
@@ -212,6 +227,7 @@ function lock(): void {
   // counter-clockwise, swap 2 and 3 so the marker is never mirrored (content stays above the surface).
   if (cross < 0) {
     [pins[2], pins[3], pins[4], pins[5]] = [pins[4], pins[5], pins[2], pins[3]];
+    [tapOffsets[2], tapOffsets[3], tapOffsets[4], tapOffsets[5]] = [tapOffsets[4], tapOffsets[5], tapOffsets[2], tapOffsets[3]];
   }
   tracker = new PlanarTracker();
   if (!tracker.init(curPyr, pins)) {
@@ -222,6 +238,9 @@ function lock(): void {
   if (tracker.cur.length / 2 < 12) {
     toast('Not much texture around the points — tracking may be unstable.', true, 3500);
   }
+  // The square is where the user tapped; the snapped pins only serve tracking.
+  const taps = pins.map((v, i) => v + tapOffsets[i]);
+  plane = new PlaneEstimator(K, tracker.H!, taps);
   mode = 'tracking';
   cornerFilter.reset();
   smoothH = null;
@@ -237,6 +256,8 @@ function lock(): void {
 function processFrame(time: number): void {
   if (!grabber || !K) return;
   const gray = grabber.grab(video);
+  // Show exactly the frame being analysed, so the content never lags behind the image.
+  scene?.markVideoFrame();
   // Ping-pong the two pyramid buffers.
   const target = prevPyr;
   prevPyr = curPyr;
@@ -262,10 +283,13 @@ function processFrame(time: number): void {
       toast('Target found again');
     }
     if (res.H) {
+      plane?.observe(res.H);
       const quad = markerQuad(res.H);
       const f = cornerFilter.filter(quad, time / 1000);
       smoothH = homographyFrom4([0, 0, 1, 0, 1, 1, 0, 1], f) ?? res.H;
     }
+    plane?.step();
+    const depthReady = (plane?.confidence ?? 0) >= 1;
     if (res.state === 'lost') {
       smoothH = null;
       setStatus('lost', 'Target lost');
@@ -274,10 +298,12 @@ function processFrame(time: number): void {
       setStatus('weak', `Tracking (weak · ${res.inliers} pts)`);
       setHint('');
     } else {
-      setStatus('tracking', `Tracking · ${res.inliers} pts`);
-      setHint('');
+      setStatus('tracking', depthReady ? `Tracking · 3D locked · ${res.inliers} pts` : `Tracking · ${res.inliers} pts`);
+      setHint(depthReady ? '' : 'Move the phone slowly to the side around the spot to measure depth');
     }
-    scene?.setPose(smoothH ? poseFromHomography(smoothH, K) : null);
+    const Hm = smoothH && plane ? plane.metricHomography(smoothH) : null;
+    lastPose = Hm ? poseFromHomography(Hm, K) : null;
+    scene?.setPose(lastPose);
   }
 }
 
@@ -381,6 +407,7 @@ async function start(source: Source): Promise<void> {
   }
   try {
     scene ??= new ARScene(glCanvas);
+    scene.setVideo(video);
   } catch {
     toast('WebGL is not available, so animations are turned off.', true, 5000);
   }
@@ -437,6 +464,13 @@ function init(): void {
     },
     get quad() {
       return smoothH ? markerQuad(smoothH) : null;
+    },
+    /** Projects a point of the virtual code's 3D frame (a, b along the edges, h above it). */
+    project(a: number, b: number, h: number) {
+      return lastPose && K ? projectPoint(lastPose, K, a, b, -h) : null;
+    },
+    get plane() {
+      return plane ? { normal: plane.normal, confidence: plane.confidence, source: plane.source } : null;
     },
     get processingSize() {
       return grabber ? [grabber.width, grabber.height] : null;

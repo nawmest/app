@@ -3,29 +3,15 @@
 // tracked virtual QR code stays on the pinned spots. Also checks lost/relocalize behaviour.
 //
 //   npm run build && npm run e2e
-import { createServer } from 'node:http';
-import { readFile, mkdir } from 'node:fs/promises';
-import { extname, join, resolve } from 'node:path';
+import { mkdir } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { chromium } from 'playwright';
+import { serve } from './serve.mjs';
 
-const root = resolve('dist');
 const out = resolve('test-output');
 await mkdir(out, { recursive: true });
-
-const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
-const server = createServer(async (req, res) => {
-  let path = join(root, decodeURIComponent(new URL(req.url, 'http://x').pathname));
-  if (path.endsWith('/')) path = join(path, 'index.html');
-  try {
-    const file = await readFile(path);
-    res.writeHead(200, { 'content-type': types[extname(path)] ?? 'application/octet-stream' });
-    res.end(file);
-  } catch {
-    res.writeHead(404).end();
-  }
-});
-await new Promise((r) => server.listen(0, '127.0.0.1', r));
-const url = `http://127.0.0.1:${server.address().port}/`;
+const server = await serve();
+const url = server.url;
 
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_PATH || undefined,
@@ -104,8 +90,12 @@ await page.screenshot({ path: join(out, '2-locked.png') });
 
 for (const [i, anim] of ['hologram', 'qrwave', 'fountain', 'solar', 'fireworks'].entries()) {
   await page.click(`.chip[data-id="${anim}"]`);
-  await app(() => (window.__fakeCam.state.frozen = false));
-  await sleep(1500);
+  // Move the camera in small steps per processed frame, independent of the browser's speed.
+  for (let k = 0; k < 30; k++) {
+    const f0 = await app(() => window.__tripoint.frames);
+    await app(() => (window.__fakeCam.state.t += 0.05));
+    await page.waitForFunction((f) => window.__tripoint.frames > f, f0);
+  }
   await page.screenshot({ path: join(out, `3-${i}-${anim}.png`) });
   await measure(`after moving with "${anim}"`);
 }
