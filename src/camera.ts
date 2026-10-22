@@ -8,17 +8,18 @@ export async function startFrontCamera(video: HTMLVideoElement): Promise<MediaSt
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new CameraError('This browser does not support camera access.');
   }
+  // 960x720 keeps the preview sharp while costing less to analyse than HD. The pulse needs frames
+  // more than pixels: in dim light phone cameras halve their frame rate for longer exposures
+  // unless asked to keep at least 24 fps (if the camera can't, fall back to anything).
+  const constraints = (frameRate: MediaTrackConstraints['frameRate']): MediaStreamConstraints => ({
+    audio: false,
+    video: { facingMode: 'user', width: { ideal: 960 }, height: { ideal: 720 }, frameRate },
+  });
   let stream: MediaStream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: {
-        facingMode: 'user',
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-        frameRate: { ideal: 30 },
-      },
-    });
+    stream = await navigator.mediaDevices
+      .getUserMedia(constraints({ ideal: 30, min: 24 }))
+      .catch((e: DOMException) => (e?.name === 'OverconstrainedError' ? navigator.mediaDevices.getUserMedia(constraints({ ideal: 30 })) : Promise.reject(e)));
   } catch (e) {
     const name = (e as DOMException)?.name;
     if (name === 'NotAllowedError') throw new CameraError('Camera access was blocked. Allow camera access for this page in your browser settings.');

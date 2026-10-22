@@ -17,6 +17,7 @@ export type GuidanceCode =
   | 'dark'
   | 'bright'
   | 'slow'
+  | 'low-fps'
   | 'ok';
 
 export const GUIDANCE: Record<GuidanceCode, string> = {
@@ -29,6 +30,7 @@ export const GUIDANCE: Record<GuidanceCode, string> = {
   dark: 'Find brighter, even light',
   bright: 'Avoid direct light on your face',
   slow: 'Camera too slow for a reading. Close other apps',
+  'low-fps': 'More light lets the camera run faster: more accurate',
   ok: 'Hold still and breathe normally',
 };
 
@@ -46,6 +48,8 @@ export interface ScanResult {
   finishedAt: Date;
   /** Eyelid statistics for the tiredness insight, or null without enough eye data. */
   eyes: EyeStats | null;
+  /** Mean analysed frame rate during the scan. */
+  fps: number;
 }
 
 export interface FrameState {
@@ -100,6 +104,7 @@ export class ScanSession {
   private lastFaceT = 0;
   private fps = 30;
   private faceH = 1;
+  private scanFrames = 0;
   private readonly eyes = new EyeAnalyzer();
   private eyeFace: FaceFrame | null = null;
 
@@ -145,6 +150,8 @@ export class ScanSession {
       else if (sample.clipped > 0.2) guidance = 'bright';
       else if (this.motion > 0.25) guidance = 'moving';
       else if (this.fps < MIN_FPS) guidance = 'slow';
+      // Measuring continues below ~14 fps, but fast heart rates and blink timing suffer.
+      else if (this.phase === 'scanning' && this.fps < 14) guidance = 'low-fps';
       else guidance = 'ok';
     } else {
       this.lastCenter = null;
@@ -171,6 +178,7 @@ export class ScanSession {
           if (face.eyeClosure !== null && face !== this.eyeFace) this.eyes.push(t, face.eyeClosure, face.jawOpen ?? 0);
           this.eyeFace = face;
           this.scanned += dt;
+          this.scanFrames++;
           if (t - this.lastEstimate > 0.25) {
             this.lastEstimate = t;
             this.vitals = this.estimator.estimate(this.fps);
@@ -216,6 +224,7 @@ export class ScanSession {
     this.estimator.reset();
     this.eyes.reset();
     this.scanned = 0;
+    this.scanFrames = 0;
     this.history.length = 0;
     this.respHistory = [];
     this.bestHrv = null;
@@ -250,6 +259,7 @@ export class ScanSession {
       trend: this.history.map((h) => [h.t, h.hr]),
       durationSec: SCAN_SECONDS,
       eyes: this.eyes.stats(),
+      fps: this.scanFrames / Math.max(1, this.scanned),
       finishedAt: new Date(),
     };
     this.phase = 'done';

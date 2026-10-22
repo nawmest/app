@@ -931,11 +931,47 @@ button {
 /* Wellness insights: three tiles on the results screen, details in a bottom sheet. */
 .insights-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   margin: 4px 2px 8px;
   color: var(--faint);
   font-size: 12px;
+}
+
+.context {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.context button {
+  padding: 5px 11px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.context button[aria-checked='true'] {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+}
+
+.context button:focus-visible {
+  outline: 2px solid var(--accent);
+}
+
+.insights-hint {
+  margin: 8px 2px 0;
+  color: var(--faint);
+  font-size: 11.5px;
+  text-align: center;
 }
 
 .tiles {

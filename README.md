@@ -77,11 +77,15 @@ front camera ─► MediaPipe Face Landmarker (478-point face mesh, on-device)
 ### Wellness insights
 
 The results screen shows three tiles; tapping one opens a sheet with the reading, a gauge, the
-measurements behind it and a tip (`src/insights/`, `src/ui/insights.ts`).
+measurements behind it and a tip (`src/insights/`, `src/ui/insights.ts`). An **At rest / Just
+exercised** switch sets the context. It is detected from the heart rate (raised, or clearly
+falling during the scan), and the person can correct it: a pulse of 91 after the gym is neither
+stress nor low fitness.
 
 * **Stress**: under stress the heart and breathing speed up and the beat-to-beat rhythm becomes
   more regular. The score weights HRV (RMSSD) most when it was measured, plus heart rate and
-  breathing; without HRV it is labelled a rough estimate. Right after exercise it asks you to
+  breathing; without HRV it is labelled a rough estimate and leans on breathing, since a raised
+  pulse alone has many causes. Right after exercise it asks you to
   rest first rather than reading the workout as stress.
 * **Sleep**: a camera can't see how you slept, but tiredness shows in the eyes. MediaPipe's
   eye-blink blendshapes give blink rate, blink length (time more than half closed), PERCLOS (the
@@ -92,6 +96,14 @@ measurements behind it and a tip (`src/insights/`, `src/ui/insights.ts`).
   and how fast the heart rate is falling during the scan, a well-known fitness sign. The slope is
   a median of pairwise slopes, checked against the first and last thirds, so a glitch can't fake
   a fast recovery. At rest it rates fitness from the resting heart rate.
+
+### Camera and frame rate
+
+The app asks for a 960×720 front-camera stream at 30 fps with a floor of 24 fps: in dim light
+phone cameras otherwise halve their frame rate for longer exposures, and the pulse needs frames
+more than pixels. Skin sampling copies only the face's bounding box from each frame. Below
+~14 fps the scan shows a hint to find more light, and the results and copied summary report the
+frame rate.
 
 ### Privacy
 

@@ -84,14 +84,14 @@ function level4(v: number, labels: [string, string, string, string]): { value: s
   return { value: labels[3], tone: 'warn' };
 }
 
-export function stressInsight(r: ScanResult): Insight {
+export function stressInsight(r: ScanResult, exercised = isAfterExercise(r)): Insight {
   const base = { key: 'stress' as const, title: 'Stress' };
   const facts: [string, string][] = [
     ['HRV (RMSSD)', r.hrv ? `${Math.round(r.hrv.rmssd)} ms` : 'Not measured'],
     ['Heart rate', `${Math.round(r.heartRate)} bpm`],
     ['Breathing', r.respiration ? `${Math.round(r.respiration)} /min` : 'Not measured'],
   ];
-  if (isAfterExercise(r)) {
+  if (exercised) {
     return {
       ...base,
       value: 'Rest first',
@@ -109,8 +109,10 @@ export function stressInsight(r: ScanResult): Insight {
   const hrS = clamp((r.heartRate - 68) / 40);
   const respS = r.respiration ? clamp((r.respiration - 12) / 12) : null;
   const hrvS = r.hrv ? clamp((Math.log(70) - Math.log(r.hrv.rmssd)) / (Math.log(70) - Math.log(15))) : null;
+  // Without HRV, calm breathing counts most: a raised pulse alone has many causes (activity,
+  // coffee), so it is weighted less.
   const v =
-    hrvS !== null ? 0.6 * hrvS + 0.25 * hrS + 0.15 * (respS ?? hrS) : respS !== null ? 0.6 * hrS + 0.4 * respS : hrS;
+    hrvS !== null ? 0.6 * hrvS + 0.25 * hrS + 0.15 * (respS ?? hrS) : respS !== null ? 0.35 * hrS + 0.65 * respS : 0.8 * hrS;
   const l = level4(v, ['Low', 'Moderate', 'High', 'Very high']);
   const summaries = [
     'Your heart rate, breathing and heart rhythm look relaxed.',
@@ -182,7 +184,7 @@ export function sleepInsight(r: ScanResult): Insight {
   };
 }
 
-export function sportInsight(r: ScanResult, age: number | null): Insight {
+export function sportInsight(r: ScanResult, age: number | null, exercised = isAfterExercise(r)): Insight {
   const base = { key: 'sport' as const, title: 'Sport' };
   const hr = r.heartRate;
   const hrMax = age ? maxHeartRate(age) : null;
@@ -195,7 +197,7 @@ export function sportInsight(r: ScanResult, age: number | null): Insight {
     : undefined;
   const facts: [string, string][] = [['Heart rate', `${Math.round(hr)} bpm`]];
 
-  if (isAfterExercise(r)) {
+  if (exercised) {
     if (age && hrMax) facts.push(['Intensity', `${zoneOf(hr, age)} · ${Math.round((hr / hrMax) * 100)}% of max`]);
     const slope = heartRateSlope(r.trend);
     const drop = slope === null ? null : -slope;
@@ -229,24 +231,29 @@ export function sportInsight(r: ScanResult, age: number | null): Insight {
     [65, 'Good', 'good'],
     [75, 'Average', 'ok'],
     [85, 'Fair', 'ok'],
-    [Infinity, 'Low', 'warn'],
+    [Infinity, 'Raised', 'warn'],
   ];
   const [, value, tone] = bands.find(([max]) => hr < max)!;
+  const raised = value === 'Raised';
   if (hrMax) facts.push(['Max heart rate', `~${Math.round(hrMax)} bpm`]);
   return {
     ...base,
-    value: `${value} fitness`,
+    value: raised ? 'Pulse raised' : `${value} fitness`,
     tone,
     caption: 'resting pulse',
     gauge: { value: clamp((hr - 45) / 45), from: 'Athletic', to: 'Raised' },
-    summary:
-      'A lower resting heart rate usually means a fitter heart. Caffeine, stress, illness and a recent workout raise it for a while.',
+    summary: raised
+      ? 'Your pulse is above a typical resting rate. That is often temporary: recent activity, coffee, stress or a short night all raise it.'
+      : 'A lower resting heart rate usually means a fitter heart. Caffeine, stress, illness and a recent workout raise it for a while.',
     facts,
-    tip: 'Scan right after a workout to see your training zone and how fast your heart recovers.',
+    tip: raised
+      ? 'For your resting fitness, sit quietly for 5 minutes and scan again. Just exercised? Switch to “Just exercised” above.'
+      : 'Scan right after a workout to see your training zone and how fast your heart recovers.',
     zones,
   };
 }
 
-export function insights(r: ScanResult, age: number | null): Insight[] {
-  return [stressInsight(r), sleepInsight(r), sportInsight(r, age)];
+/** `exercised`: whether the scan was right after exercise (detected when not given). */
+export function insights(r: ScanResult, age: number | null, exercised = isAfterExercise(r)): Insight[] {
+  return [stressInsight(r, exercised), sleepInsight(r), sportInsight(r, age, exercised)];
 }

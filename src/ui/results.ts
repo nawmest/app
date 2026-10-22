@@ -43,6 +43,10 @@ function rangeBar(value: number, min: number, max: number, lo: number, hi: numbe
 
 const pill = (s: Status) => `<span class="status-pill ${s.tone === 'ok' ? '' : s.tone}">${esc(s.text)}</span>`;
 
+/** Heart-rate status; a raised rate right after exercise is expected, not a warning. */
+export const heartRatePill = (hr: number, exercised: boolean) =>
+  pill(exercised && hr > 100 ? { text: 'Raised from activity', tone: 'muted' } : heartRateStatus(hr));
+
 /** Builds the results screen. Returns the trend canvas to draw into. */
 export function renderResults(root: HTMLElement, r: ScanResult): HTMLCanvasElement {
   const hr = Math.round(r.heartRate);
@@ -61,7 +65,7 @@ export function renderResults(root: HTMLElement, r: ScanResult): HTMLCanvasEleme
     <section class="panel hero">
       <div class="panel-title"><span class="heart-ico" style="color:var(--hr)"></span>Heart rate</div>
       <div class="big"><span class="num">${hr}</span><span class="unit">bpm</span></div>
-      ${pill(isAfterExercise(r) && hr > 100 ? { text: 'Raised from activity', tone: 'muted' } : heartRateStatus(hr))}
+      <span id="hr-pill">${heartRatePill(hr, isAfterExercise(r))}</span>
       ${rangeBar(hr, 40, 140, 60, 100, 'var(--hr)')}
       <canvas id="trend" aria-label="Heart rate during the scan"></canvas>
       <p class="mini-note">Varied between ${Math.round(r.heartRateRange[0])} and ${Math.round(r.heartRateRange[1])} bpm over the last 15 seconds.</p>
@@ -98,6 +102,10 @@ export function renderResults(root: HTMLElement, r: ScanResult): HTMLCanvasEleme
         q >= 50
           ? 'Steady signal: these readings are as reliable as a camera scan gets.'
           : 'A noisy signal: for a better reading, sit still in even, bright light facing the camera.'
+      }${
+        r.fps < 14
+          ? ` Your camera analysed only ${Math.round(r.fps)} frames per second; brighter light lets it run faster.`
+          : ''
       }</p>
     </section>
 
@@ -165,14 +173,14 @@ export function drawTrend(canvas: HTMLCanvasElement, trend: [number, number][], 
   ctx.stroke(line);
 }
 
-export function summaryText(r: ScanResult): string {
+export function summaryText(r: ScanResult, exercised = isAfterExercise(r)): string {
   const lines = [
     `PulseLens scan, ${r.finishedAt.toLocaleString()}`,
     `Heart rate: ${Math.round(r.heartRate)} bpm`,
     `Breathing: ${r.respiration ? `${Math.round(r.respiration)} breaths/min` : 'not measured'}`,
     `HRV (RMSSD): ${r.hrv ? `${Math.round(r.hrv.rmssd)} ms` : 'not measured'}`,
-    ...insightsText(r),
-    `Signal quality: ${Math.round(r.quality * 100)}%`,
+    ...insightsText(r, exercised),
+    `Signal quality: ${Math.round(r.quality * 100)}% · camera ${Math.round(r.fps)} fps`,
     'Camera-based estimate for wellness only, not a medical measurement.',
     `PulseLens ${__BUILD__}`,
   ];

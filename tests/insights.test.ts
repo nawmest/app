@@ -27,6 +27,7 @@ function result(o: Partial<ScanResult> = {}): ScanResult {
     durationSec: 30,
     finishedAt: new Date(),
     eyes: eyes(),
+    fps: 30,
     ...o,
   };
 }
@@ -78,6 +79,15 @@ describe('insights', () => {
     expect(s.value).toBe('Fast recovery');
     expect(s.zones!.filter((z) => z.current)).toHaveLength(1);
     expect(sportInsight(result({ heartRate: 128, trend: trend(130, 126) }), null).value).toBe('Still high');
+  });
+
+  it('reads a raised pulse without HRV gently (a real post-gym scan: 91 bpm, 11 breaths/min)', () => {
+    const r = result({ heartRate: 91, respiration: 11, hrv: null });
+    expect(stressInsight(r).value).toBe('Low'); // calm breathing; another app said "Low" too
+    expect(sportInsight(r, null).value).toBe('Pulse raised');
+    // The person says they just exercised: no stress reading, recovery view instead.
+    expect(stressInsight(r, true).value).toBe('Rest first');
+    expect(sportInsight(r, 30, true).caption).toBe('after workout');
   });
 
   it('rates resting fitness from the resting heart rate', () => {

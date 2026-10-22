@@ -45,7 +45,9 @@ export class SkinSampler {
     x1 = Math.min(this.width - 1, Math.ceil(x1));
     y1 = Math.min(this.height - 1, Math.ceil(y1));
     if (x1 <= x0 || y1 <= y0) return null;
-    this.ctx.drawImage(video, 0, 0, this.width, this.height);
+    // Copy only the face's bounding box from the video (cheaper than the whole frame).
+    const s = 1 / this.scale;
+    this.ctx.drawImage(video, x0 * s, y0 * s, (x1 - x0 + 1) * s, (y1 - y0 + 1) * s, x0, y0, x1 - x0 + 1, y1 - y0 + 1);
     const w = x1 - x0 + 1;
     const img = this.ctx.getImageData(x0, y0, w, y1 - y0 + 1).data;
     let r = 0, g = 0, b = 0, n = 0, lum = 0, clipped = 0, total = 0;

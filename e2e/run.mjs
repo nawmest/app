@@ -68,6 +68,10 @@ console.log(`      breathing: ${r?.respiration ? r.respiration.toFixed(1) + '/mi
 // Wellness insights: three tiles, each opening a details sheet; age adds training zones.
 const tiles = await page.$$eval('#results .tile', (els) => els.map((e) => `${e.querySelector('.tile-top').textContent.trim()}: ${e.querySelector('.tile-value').textContent.trim()}`));
 check(tiles.length === 3, `wellness tiles: ${tiles.join(' · ')}`);
+await page.click('#results .context [data-exercised="true"]');
+check((await page.textContent('#results .tile.stress .tile-value')).trim() === 'Rest first', 'switching to "Just exercised" updates the insights');
+await page.screenshot({ path: join(out, '5-results-exercised.png'), fullPage: true });
+await page.click('#results .context [data-exercised="false"]');
 await page.click('#results .tile.sport');
 check(await page.isVisible('#sheet[open]'), 'tapping a tile opens its details');
 await page.fill('#age', '30');

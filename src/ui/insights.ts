@@ -1,4 +1,4 @@
-import { type Insight, insights } from '../insights/insights';
+import { type Insight, insights, isAfterExercise } from '../insights/insights';
 import type { ScanResult } from '../scan';
 
 const AGE_KEY = 'pulselens-age';
@@ -35,12 +35,21 @@ function tile(i: Insight): string {
     </button>`;
 }
 
-/** The insights row for the results screen. */
-export function insightsHtml(r: ScanResult): string {
+/**
+ * The insights row for the results screen. `exercised` says whether the scan was right after
+ * exercise: detected from the heart rate, and the person can correct it.
+ */
+export function insightsHtml(r: ScanResult, exercised = isAfterExercise(r)): string {
+  const opt = (value: boolean, label: string) =>
+    `<button type="button" role="radio" aria-checked="${exercised === value}" data-exercised="${value}">${label}</button>`;
   return `
     <section class="insights" aria-label="Wellness insights">
-      <div class="insights-head"><span class="panel-title">Wellness</span><span>Tap for details</span></div>
-      <div class="tiles">${insights(r, savedAge()).map(tile).join('')}</div>
+      <div class="insights-head">
+        <span class="panel-title">Wellness</span>
+        <div class="context" role="radiogroup" aria-label="When was this scan?">${opt(false, 'At rest')}${opt(true, 'Just exercised')}</div>
+      </div>
+      <div class="tiles">${insights(r, savedAge(), exercised).map(tile).join('')}</div>
+      <p class="insights-hint">Tap a tile for details</p>
     </section>`;
 }
 
@@ -83,8 +92,12 @@ function sheetBody(i: Insight, age: number | null): string {
     <p class="sheet-note">A wellness estimate from a 30-second camera scan, not a medical measurement.</p>`;
 }
 
-/** Wires the insight tiles in `root`: each opens a bottom sheet with the details. */
-export function wireInsights(root: HTMLElement, r: ScanResult): void {
+/**
+ * Wires the insights in `root`: the rest/exercise switch, and tiles that each open a bottom
+ * sheet with the details. `onContext` is told when the person changes the switch.
+ */
+export function wireInsights(root: HTMLElement, r: ScanResult, onContext?: (exercised: boolean) => void): void {
+  let exercised = isAfterExercise(r);
   let sheet = document.getElementById('sheet') as HTMLDialogElement | null;
   if (!sheet) {
     sheet = document.createElement('dialog');
@@ -100,7 +113,7 @@ export function wireInsights(root: HTMLElement, r: ScanResult): void {
   const dialog = sheet;
   const open = (key: string) => {
     const age = savedAge();
-    const i = insights(r, age).find((x) => x.key === key)!;
+    const i = insights(r, age, exercised).find((x) => x.key === key)!;
     dialog.innerHTML = `<div class="sheet-inner">${sheetBody(i, age)}</div>`;
     dialog.querySelector('.sheet-close')!.addEventListener('click', () => dialog.close());
     const input = dialog.querySelector<HTMLInputElement>('#age');
@@ -108,19 +121,35 @@ export function wireInsights(root: HTMLElement, r: ScanResult): void {
       const v = Math.round(Number(input.value));
       saveAge(input.value === '' ? null : v >= 10 && v <= 100 ? v : savedAge());
       // Refresh the sheet and the tiles with the new zones.
-      const tiles = root.querySelector('.insights');
-      if (tiles) tiles.outerHTML = insightsHtml(r);
-      bindTiles();
+      refresh();
       open(key);
     });
     if (!dialog.open) dialog.showModal();
   };
-  const bindTiles = () =>
+  const bind = () => {
     root.querySelectorAll<HTMLButtonElement>('.tile').forEach((b) => b.addEventListener('click', () => open(b.dataset.key!)));
-  bindTiles();
+    root.querySelectorAll<HTMLButtonElement>('.context button').forEach((b) =>
+      b.addEventListener('click', () => {
+        const value = b.dataset.exercised === 'true';
+        if (value === exercised) return;
+        exercised = value;
+        refresh();
+        onContext?.(exercised);
+      }),
+    );
+  };
+  const refresh = () => {
+    const section = root.querySelector('.insights');
+    if (section) section.outerHTML = insightsHtml(r, exercised);
+    bind();
+  };
+  bind();
 }
 
 /** Insight lines for the copied summary. */
-export function insightsText(r: ScanResult): string[] {
-  return insights(r, savedAge()).map((i) => `${i.title}: ${i.value} (${i.caption})`);
+export function insightsText(r: ScanResult, exercised = isAfterExercise(r)): string[] {
+  return [
+    `Context: ${exercised ? 'just exercised' : 'at rest'}`,
+    ...insights(r, savedAge(), exercised).map((i) => `${i.title}: ${i.value} (${i.caption})`),
+  ];
 }

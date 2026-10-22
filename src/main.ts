@@ -4,7 +4,8 @@ import { createFaceTracker, type FaceTracker } from './face/landmarker';
 import { GUIDANCE, SCAN_SECONDS, ScanSession, type FrameState } from './scan';
 import { FxRenderer } from './ui/fx';
 import { wireInsights } from './ui/insights';
-import { drawTrend, heartRateStatus, renderResults, summaryText } from './ui/results';
+import { isAfterExercise } from './insights/insights';
+import { drawTrend, heartRatePill, heartRateStatus, renderResults, summaryText } from './ui/results';
 import { WaveRenderer } from './ui/wave';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -276,14 +277,18 @@ function finish(): void {
   if (!result) return;
   const body = $('results-body');
   const trend = renderResults(body, result);
-  wireInsights(body, result);
+  let exercised = isAfterExercise(result);
+  wireInsights(body, result, (e) => {
+    exercised = e;
+    $('hr-pill').innerHTML = heartRatePill(Math.round(result.heartRate), e);
+  });
   show('results');
   requestAnimationFrame(() => drawTrend(trend, result.trend, result.durationSec));
   $('btn-again').addEventListener('click', startScan);
   $('btn-copy').addEventListener('click', async (e) => {
     const btn = e.currentTarget as HTMLButtonElement;
     try {
-      await navigator.clipboard.writeText(summaryText(result));
+      await navigator.clipboard.writeText(summaryText(result, exercised));
       btn.textContent = 'Copied';
     } catch {
       btn.textContent = 'Copy not available';
