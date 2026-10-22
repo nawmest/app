@@ -3,7 +3,10 @@
  * general-population estimates for a wellness app, not diagnoses; each one says what it is
  * based on.
  */
+import type { Person } from '../profile';
 import type { ScanResult } from '../scan';
+
+const NOBODY: Person = { age: null, sex: null, weightKg: null };
 
 export type Tone = 'good' | 'ok' | 'warn' | 'muted';
 
@@ -71,6 +74,25 @@ const ZONES = [
   { name: 'Zone 5 · Maximum', lo: 0.9, hi: 1.0 },
 ];
 
+/**
+ * Typical resting RMSSD (ms) for an age: short-term HRV falls by roughly a fifth per decade in
+ * adults. Without an age, a general adult value.
+ */
+export const typicalRmssd = (age: number | null) => (age === null ? 45 : 50 * Math.exp(-0.02 * (age - 30)));
+
+/**
+ * Energy use during exercise from heart rate, weight, age and sex (Keytel et al. 2005, without
+ * VO2max), in kcal per minute. Meant for exercise heart rates (~90-150 bpm).
+ */
+export function exerciseKcalPerMin(hr: number, p: Person): number | null {
+  if (!p.sex || !p.weightKg || p.age === null) return null;
+  const kj =
+    p.sex === 'male'
+      ? -55.0969 + 0.6309 * hr + 0.1988 * p.weightKg + 0.2017 * p.age
+      : -20.4022 + 0.4472 * hr - 0.1263 * p.weightKg + 0.074 * p.age;
+  return kj > 0 ? kj / 4.184 : null;
+}
+
 export function zoneOf(hr: number, age: number): string {
   const pct = hr / maxHeartRate(age);
   if (pct < 0.5) return 'Resting';
@@ -84,7 +106,7 @@ function level4(v: number, labels: [string, string, string, string]): { value: s
   return { value: labels[3], tone: 'warn' };
 }
 
-export function stressInsight(r: ScanResult, exercised = isAfterExercise(r)): Insight {
+export function stressInsight(r: ScanResult, exercised = isAfterExercise(r), who: Person = NOBODY): Insight {
   const base = { key: 'stress' as const, title: 'Stress' };
   const facts: [string, string][] = [
     ['HRV (RMSSD)', r.hrv ? `${Math.round(r.hrv.rmssd)} ms` : 'Not measured'],
@@ -108,7 +130,9 @@ export function stressInsight(r: ScanResult, exercised = isAfterExercise(r)): In
   // timing more regular (lower HRV). HRV is the strongest sign, when it could be measured.
   const hrS = clamp((r.heartRate - 68) / 40);
   const respS = r.respiration ? clamp((r.respiration - 12) / 12) : null;
-  const hrvS = r.hrv ? clamp((Math.log(70) - Math.log(r.hrv.rmssd)) / (Math.log(70) - Math.log(15))) : null;
+  // HRV is judged against what is typical for the person's age (HRV falls with age).
+  const typical = typicalRmssd(who.age);
+  const hrvS = r.hrv ? clamp(Math.log((1.55 * typical) / r.hrv.rmssd) / Math.log(1.55 / 0.35)) : null;
   // Without HRV, calm breathing counts most: a raised pulse alone has many causes (activity,
   // coffee), so it is weighted less.
   const v =
@@ -123,7 +147,7 @@ export function stressInsight(r: ScanResult, exercised = isAfterExercise(r)): In
   return {
     ...base,
     ...l,
-    caption: hrvS !== null ? 'from HRV' : 'rough estimate',
+    caption: hrvS !== null ? (who.age !== null ? 'HRV for your age' : 'from HRV') : 'rough estimate',
     gauge: { value: v, from: 'Relaxed', to: 'Stressed' },
     summary:
       summaries[['Low', 'Moderate', 'High', 'Very high'].indexOf(l.value)] +
@@ -184,9 +208,10 @@ export function sleepInsight(r: ScanResult): Insight {
   };
 }
 
-export function sportInsight(r: ScanResult, age: number | null, exercised = isAfterExercise(r)): Insight {
+export function sportInsight(r: ScanResult, who: Person = NOBODY, exercised = isAfterExercise(r)): Insight {
   const base = { key: 'sport' as const, title: 'Sport' };
   const hr = r.heartRate;
+  const age = who.age;
   const hrMax = age ? maxHeartRate(age) : null;
   const zones = hrMax
     ? ZONES.map((z) => ({
@@ -203,6 +228,8 @@ export function sportInsight(r: ScanResult, age: number | null, exercised = isAf
     const drop = slope === null ? null : -slope;
     if (drop !== null) facts.push(['Recovery', drop > 0 ? `falling ${Math.round(drop)} bpm/min` : 'not falling yet']);
     if (r.respiration) facts.push(['Breathing', `${Math.round(r.respiration)} /min`]);
+    const kcal = hr >= 90 ? exerciseKcalPerMin(hr, who) : null;
+    if (kcal) facts.push(['Burn at this pulse', `~${Math.round(kcal)} kcal/min`]);
     // How fast the heart rate drops after exercise is a well-known sign of cardio fitness.
     const rec =
       drop === null
@@ -218,19 +245,21 @@ export function sportInsight(r: ScanResult, age: number | null, exercised = isAf
       tone: rec.tone,
       caption: 'after workout',
       gauge: hrMax ? { value: clamp((hr / hrMax - 0.5) / 0.5), from: 'Rest', to: 'Max' } : null,
-      summary: rec.text + (hrMax ? '' : ' Add your age to see your training zone.'),
+      summary: rec.text + (hrMax ? '' : ' Add your birth year to your profile to see your training zone.'),
       facts,
       tip: 'Cool down until you can talk easily and your heart rate is under 100. Scanning right after a workout shows how fast you recover.',
       zones,
     };
   }
 
-  // At rest: a lower resting heart rate usually means a fitter heart (general adult bands).
+  // At rest: a lower resting heart rate usually means a fitter heart. Adult bands; women's and
+  // older adults' resting rates run a few beats higher (as in common fitness charts).
+  const shift = (who.sex === 'female' ? 4 : 0) + (age !== null && age >= 46 ? 2 : 0);
   const bands: [number, string, Tone][] = [
-    [55, 'Excellent', 'good'],
-    [65, 'Good', 'good'],
-    [75, 'Average', 'ok'],
-    [85, 'Fair', 'ok'],
+    [55 + shift, 'Excellent', 'good'],
+    [65 + shift, 'Good', 'good'],
+    [75 + shift, 'Average', 'ok'],
+    [85 + shift, 'Fair', 'ok'],
     [Infinity, 'Raised', 'warn'],
   ];
   const [, value, tone] = bands.find(([max]) => hr < max)!;
@@ -240,7 +269,7 @@ export function sportInsight(r: ScanResult, age: number | null, exercised = isAf
     ...base,
     value: raised ? 'Pulse raised' : `${value} fitness`,
     tone,
-    caption: 'resting pulse',
+    caption: who.sex || age !== null ? 'resting pulse, for you' : 'resting pulse',
     gauge: { value: clamp((hr - 45) / 45), from: 'Athletic', to: 'Raised' },
     summary: raised
       ? 'Your pulse is above a typical resting rate. That is often temporary: recent activity, coffee, stress or a short night all raise it.'
@@ -254,6 +283,6 @@ export function sportInsight(r: ScanResult, age: number | null, exercised = isAf
 }
 
 /** `exercised`: whether the scan was right after exercise (detected when not given). */
-export function insights(r: ScanResult, age: number | null, exercised = isAfterExercise(r)): Insight[] {
-  return [stressInsight(r, exercised), sleepInsight(r), sportInsight(r, age, exercised)];
+export function insights(r: ScanResult, who: Person = NOBODY, exercised = isAfterExercise(r)): Insight[] {
+  return [stressInsight(r, exercised, who), sleepInsight(r), sportInsight(r, who, exercised)];
 }

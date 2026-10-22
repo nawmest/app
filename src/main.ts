@@ -3,9 +3,11 @@ import { CameraError, startFrontCamera, stopCamera } from './camera';
 import { createFaceTracker, type FaceTracker } from './face/landmarker';
 import { GUIDANCE, SCAN_SECONDS, ScanSession, type FrameState } from './scan';
 import { FxRenderer } from './ui/fx';
+import { markProfileOffered, profileOffered } from './profile';
 import { wireInsights } from './ui/insights';
+import { openProfileSheet, profileRowText } from './ui/profile';
 import { isAfterExercise } from './insights/insights';
-import { drawTrend, heartRatePill, heartRateStatus, renderResults, summaryText } from './ui/results';
+import { drawTrend, heartRatePill, heartRateStatus, hrvPill, renderResults, summaryText } from './ui/results';
 import { WaveRenderer } from './ui/wave';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -75,6 +77,12 @@ function showError(message: string): void {
 }
 
 async function startScan(): Promise<void> {
+  // Offer the (optional) profile once, before the first scan.
+  if (!profileOffered()) {
+    markProfileOffered();
+    await openProfileSheet(true);
+    $('profile-text').textContent = profileRowText();
+  }
   $('intro-error').hidden = true;
   $<HTMLButtonElement>('btn-start').disabled = true;
   show('loading');
@@ -278,10 +286,18 @@ function finish(): void {
   const body = $('results-body');
   const trend = renderResults(body, result);
   let exercised = isAfterExercise(result);
-  wireInsights(body, result, (e) => {
-    exercised = e;
-    $('hr-pill').innerHTML = heartRatePill(Math.round(result.heartRate), e);
-  });
+  wireInsights(
+    body,
+    result,
+    (e) => {
+      exercised = e;
+      $('hr-pill').innerHTML = heartRatePill(Math.round(result.heartRate), e);
+    },
+    () => {
+      if (result.hrv) $('hrv-pill').innerHTML = hrvPill(result.hrv.rmssd);
+      $('profile-text').textContent = profileRowText();
+    },
+  );
   show('results');
   requestAnimationFrame(() => drawTrend(trend, result.trend, result.durationSec));
   $('btn-again').addEventListener('click', startScan);
@@ -348,6 +364,12 @@ function updateDebug(s: FrameState | null, now: number): void {
 /* ------------------------------------------------------------------ wiring */
 
 $('btn-start').addEventListener('click', startScan);
+$('profile-text').textContent = profileRowText();
+$('btn-profile').addEventListener('click', async () => {
+  markProfileOffered();
+  await openProfileSheet();
+  $('profile-text').textContent = profileRowText();
+});
 $('btn-close').addEventListener('click', () => {
   stopScan();
   show('intro');

@@ -37,6 +37,15 @@ await page.screenshot({ path: join(out, '0-intro.png') });
 // Nobody in front of the camera: the app asks for a face and doesn't start measuring.
 await page.evaluate(() => (window.__fakeCam.state.present = false));
 await page.click('#btn-start');
+// First start: the optional profile is offered once.
+check(await waitFor(() => !!document.querySelector('#profile-sheet[open]'), null, 5000), 'offers the optional profile before the first scan');
+await page.click('#profile-sheet [data-sex="male"]');
+await page.fill('#profile-sheet input[name="birthYear"]', '1995');
+await page.fill('#profile-sheet input[name="heightCm"]', '187');
+await page.fill('#profile-sheet input[name="weightKg"]', '82');
+check((await page.textContent('#profile-sheet .bmi')).includes('23.4'), 'shows BMI from height and weight');
+await page.screenshot({ path: join(out, '0b-profile.png') });
+await page.click('#profile-sheet button[type="submit"]');
 check(await waitFor(() => window.__pulse.state?.guidance === 'no-face', null, 60000), 'asks for a face when nobody is in view');
 await page.waitForTimeout(800);
 check((await state()).phase !== 'scanning', 'does not measure without a face');
@@ -74,9 +83,7 @@ await page.screenshot({ path: join(out, '5-results-exercised.png'), fullPage: tr
 await page.click('#results .context [data-exercised="false"]');
 await page.click('#results .tile.sport');
 check(await page.isVisible('#sheet[open]'), 'tapping a tile opens its details');
-await page.fill('#age', '30');
-await page.$eval('#age', (e) => e.blur());
-check((await page.$$('#sheet .zones li')).length === 5, 'entering an age shows heart-rate zones');
+check((await page.$$('#sheet .zones li')).length === 5, 'the profile age gives heart-rate zones');
 await page.waitForTimeout(400);
 await page.screenshot({ path: join(out, '6-sport-sheet.png') });
 await page.click('#sheet .sheet-close');

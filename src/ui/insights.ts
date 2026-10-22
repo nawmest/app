@@ -1,27 +1,10 @@
 import { type Insight, insights, isAfterExercise } from '../insights/insights';
+import { loadProfile, person } from '../profile';
 import type { ScanResult } from '../scan';
+import { openProfileSheet } from './profile';
 
-const AGE_KEY = 'pulselens-age';
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
-
-/** Age for heart-rate zones, remembered on this device only. */
-export function savedAge(): number | null {
-  try {
-    const v = Number(localStorage.getItem(AGE_KEY));
-    return v >= 10 && v <= 100 ? v : null;
-  } catch {
-    return null;
-  }
-}
-
-function saveAge(age: number | null): void {
-  try {
-    if (age === null) localStorage.removeItem(AGE_KEY);
-    else localStorage.setItem(AGE_KEY, String(age));
-  } catch {
-    // Storage blocked: zones still work for this view.
-  }
-}
+const who = () => person(loadProfile());
 
 const pct = (v: number) => `${Math.round(Math.max(0.03, Math.min(1, v)) * 100)}%`;
 
@@ -48,7 +31,7 @@ export function insightsHtml(r: ScanResult, exercised = isAfterExercise(r)): str
         <span class="panel-title">Wellness</span>
         <div class="context" role="radiogroup" aria-label="When was this scan?">${opt(false, 'At rest')}${opt(true, 'Just exercised')}</div>
       </div>
-      <div class="tiles">${insights(r, savedAge(), exercised).map(tile).join('')}</div>
+      <div class="tiles">${insights(r, who(), exercised).map(tile).join('')}</div>
       <p class="insights-hint">Tap a tile for details</p>
     </section>`;
 }
@@ -65,16 +48,14 @@ function sheetBody(i: Insight, age: number | null): string {
     : '';
   const sport =
     i.key === 'sport'
-      ? `<label class="age-row"><span>Your age</span>
-           <input id="age" type="number" inputmode="numeric" min="10" max="100" placeholder="—" value="${age ?? ''}" />
-           <small>for heart-rate zones · saved on this phone only</small></label>
-         ${
-           i.zones
-             ? `<ol class="zones">${i.zones
-                 .map((z) => `<li class="${z.current ? 'current' : ''}"><span>${esc(z.name)}</span><span>${esc(z.range)}</span></li>`)
-                 .join('')}</ol>`
-             : ''
-         }`
+      ? `${
+          i.zones
+            ? `<ol class="zones">${i.zones
+                .map((z) => `<li class="${z.current ? 'current' : ''}"><span>${esc(z.name)}</span><span>${esc(z.range)}</span></li>`)
+                .join('')}</ol>`
+            : ''
+        }
+        <button type="button" class="link-btn" data-profile>${age === null ? 'Add your birth year for heart-rate zones' : 'Edit your profile'}</button>`
       : '';
   return `
     <header class="sheet-head">
@@ -96,7 +77,12 @@ function sheetBody(i: Insight, age: number | null): string {
  * Wires the insights in `root`: the rest/exercise switch, and tiles that each open a bottom
  * sheet with the details. `onContext` is told when the person changes the switch.
  */
-export function wireInsights(root: HTMLElement, r: ScanResult, onContext?: (exercised: boolean) => void): void {
+export function wireInsights(
+  root: HTMLElement,
+  r: ScanResult,
+  onContext?: (exercised: boolean) => void,
+  onProfile?: () => void,
+): void {
   let exercised = isAfterExercise(r);
   let sheet = document.getElementById('sheet') as HTMLDialogElement | null;
   if (!sheet) {
@@ -112,16 +98,16 @@ export function wireInsights(root: HTMLElement, r: ScanResult, onContext?: (exer
   }
   const dialog = sheet;
   const open = (key: string) => {
-    const age = savedAge();
-    const i = insights(r, age, exercised).find((x) => x.key === key)!;
-    dialog.innerHTML = `<div class="sheet-inner">${sheetBody(i, age)}</div>`;
+    const p = who();
+    const i = insights(r, p, exercised).find((x) => x.key === key)!;
+    dialog.innerHTML = `<div class="sheet-inner">${sheetBody(i, p.age)}</div>`;
     dialog.querySelector('.sheet-close')!.addEventListener('click', () => dialog.close());
-    const input = dialog.querySelector<HTMLInputElement>('#age');
-    input?.addEventListener('change', () => {
-      const v = Math.round(Number(input.value));
-      saveAge(input.value === '' ? null : v >= 10 && v <= 100 ? v : savedAge());
-      // Refresh the sheet and the tiles with the new zones.
+    dialog.querySelector('[data-profile]')?.addEventListener('click', async () => {
+      dialog.close();
+      await openProfileSheet();
+      // Refresh the tiles and this sheet with the personal ranges.
       refresh();
+      onProfile?.();
       open(key);
     });
     if (!dialog.open) dialog.showModal();
@@ -150,6 +136,6 @@ export function wireInsights(root: HTMLElement, r: ScanResult, onContext?: (exer
 export function insightsText(r: ScanResult, exercised = isAfterExercise(r)): string[] {
   return [
     `Context: ${exercised ? 'just exercised' : 'at rest'}`,
-    ...insights(r, savedAge(), exercised).map((i) => `${i.title}: ${i.value} (${i.caption})`),
+    ...insights(r, who(), exercised).map((i) => `${i.title}: ${i.value} (${i.caption})`),
   ];
 }

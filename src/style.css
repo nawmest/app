@@ -105,6 +105,10 @@ button {
   --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M13.5 2 4 14h6.5L9.5 22 20 9.5h-6.5z'/%3E%3C/svg%3E");
 }
 
+.user-ico {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='8' r='4.2'/%3E%3Cpath d='M3.5 21c.6-4.6 4-7.3 8.5-7.3s7.9 2.7 8.5 7.3z'/%3E%3C/svg%3E");
+}
+
 .x-ico {
   --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M6 6l12 12M18 6L6 18'/%3E%3C/svg%3E");
 }
@@ -1239,34 +1243,6 @@ button {
   text-align: right;
 }
 
-.age-row {
-  display: grid;
-  grid-template-columns: auto 72px;
-  align-items: center;
-  gap: 4px 12px;
-  margin-top: 14px;
-  font-size: 13.5px;
-  color: var(--muted);
-}
-
-.age-row input {
-  width: 72px;
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text);
-  font: inherit;
-  font-weight: 600;
-  text-align: center;
-}
-
-.age-row small {
-  grid-column: 1 / -1;
-  color: var(--faint);
-  font-size: 11.5px;
-}
-
 .zones {
   display: grid;
   gap: 4px;
@@ -1304,6 +1280,112 @@ button {
   margin: 12px 0 0;
   color: var(--faint);
   font-size: 11.5px;
+}
+
+/* Profile: one row on the start screen, a form in a bottom sheet. */
+.profile-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.profile-row .user-ico {
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
+}
+
+.profile-row #profile-text {
+  flex: 1;
+}
+
+.profile-row .chev {
+  color: var(--faint);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.sheet-head .user-ico {
+  color: var(--accent);
+}
+
+.profile-form .field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.profile-form .sheet-summary + .field {
+  margin-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.profile-form input {
+  width: 110px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  text-align: right;
+}
+
+.unit-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.unit-input input {
+  width: 84px;
+}
+
+.unit-input i {
+  width: 22px;
+  color: var(--faint);
+  font-style: normal;
+  font-size: 13px;
+}
+
+.bmi {
+  min-height: 1.2em;
+  margin: 10px 0 0;
+  color: var(--faint);
+  font-size: 12.5px;
+}
+
+.profile-form .actions {
+  margin-top: 16px;
+}
+
+.link-btn {
+  margin-top: 12px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 /* Lite mode (performance governor): no live blur behind glass panels. */

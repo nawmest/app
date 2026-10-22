@@ -1,5 +1,6 @@
 import type { ScanResult } from '../scan';
-import { isAfterExercise } from '../insights/insights';
+import { isAfterExercise, typicalRmssd } from '../insights/insights';
+import { loadProfile, person } from '../profile';
 import { insightsHtml, insightsText } from './insights';
 
 interface Status {
@@ -22,8 +23,17 @@ export function respirationStatus(rpm: number): Status {
   return { text: 'Faster than typical', tone: 'warn' };
 }
 
-/** RMSSD varies a lot with age and fitness; these bands are only a rough guide for adults. */
-export function hrvStatus(rmssd: number): Status {
+/**
+ * RMSSD varies a lot with age and fitness. With an age, it is compared with what is typical for
+ * that age; otherwise these bands are only a rough guide for adults.
+ */
+export function hrvStatus(rmssd: number, age: number | null = person(loadProfile()).age): Status {
+  if (age !== null) {
+    const ratio = rmssd / typicalRmssd(age);
+    if (ratio < 0.6) return { text: 'Lower than typical for your age', tone: 'warn' };
+    if (ratio <= 1.6) return { text: 'Typical for your age', tone: 'ok' };
+    return { text: 'Higher than typical for your age', tone: 'ok' };
+  }
   if (rmssd < 20) return { text: 'On the lower side', tone: 'warn' };
   if (rmssd <= 80) return { text: 'Typical range', tone: 'ok' };
   return { text: 'On the higher side', tone: 'ok' };
@@ -42,6 +52,8 @@ function rangeBar(value: number, min: number, max: number, lo: number, hi: numbe
 }
 
 const pill = (s: Status) => `<span class="status-pill ${s.tone === 'ok' ? '' : s.tone}">${esc(s.text)}</span>`;
+
+export const hrvPill = (rmssd: number) => pill(hrvStatus(rmssd));
 
 /** Heart-rate status; a raised rate right after exercise is expected, not a warning. */
 export const heartRatePill = (hr: number, exercised: boolean) =>
@@ -86,7 +98,7 @@ export function renderResults(root: HTMLElement, r: ScanResult): HTMLCanvasEleme
         <div class="panel-title"><span class="wave-ico" style="color:var(--hrv)"></span>HRV · RMSSD</div>
         ${
           r.hrv
-            ? `<div class="big"><span class="num">${Math.round(r.hrv.rmssd)}</span><span class="unit">ms</span></div>${pill(hrvStatus(r.hrv.rmssd))}`
+            ? `<div class="big"><span class="num">${Math.round(r.hrv.rmssd)}</span><span class="unit">ms</span></div><span id="hrv-pill">${pill(hrvStatus(r.hrv.rmssd))}</span>`
             : `<div class="big"><span class="num">—</span></div>${pill({ text: 'Needs a steadier signal', tone: 'muted' })}`
         }
       </section>

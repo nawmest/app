@@ -97,6 +97,15 @@ stress nor low fitness.
   a median of pairwise slopes, checked against the first and last thirds, so a glitch can't fake
   a fast recovery. At rest it rates fitness from the resting heart rate.
 
+### Profile
+
+An optional profile (sex, birth year, height, weight) is offered once before the first scan and
+can be edited from the start screen. It stays on the phone (`src/profile.ts`). Age sets the
+training zones and the HRV norm (typical RMSSD falls about a fifth per decade); sex and age shift
+the resting-pulse fitness bands; weight, age and sex give workout calories per minute at the
+measured heart rate (Keytel et al. 2005). Height only gives BMI in the profile. PulseLens doesn't
+estimate blood pressure, so it doesn't ask for it.
+
 ### Camera and frame rate
 
 The app asks for a 960×720 front-camera stream at 30 fps with a floor of 24 fps: in dim light
@@ -154,9 +163,10 @@ phones keep tabs open and GitHub Pages lets browsers cache the page.
 
 ### Tests
 
-* `tests/eyes.test.ts`: blink rate and length, drooping lids, yawns, long closures, a raised
+* `tests/profile.test.ts`: profile validation, age and BMI. `tests/eyes.test.ts`: blink rate and length, drooping lids, yawns, long closures, a raised
   open-eye level, and the closed-eyes and slow-camera flags. `tests/insights.test.ts`: the
-  stress, sleep and sport assessments, after-exercise detection and the recovery slope.
+  stress, sleep and sport assessments, after-exercise detection, the recovery slope, age-adjusted
+  HRV, sex-adjusted resting norms and workout calories.
 
 * `tests/rppg.test.ts` simulates the mean skin colour of a face: a realistic pulse wave with
   beat-to-beat variability, breathing, lighting flicker, noise and jittery frame timing. It checks

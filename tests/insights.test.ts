@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { EyeStats } from '../src/insights/eyes';
-import { heartRateSlope, isAfterExercise, sleepInsight, sportInsight, stressInsight, zoneOf } from '../src/insights/insights';
+import { exerciseKcalPerMin, heartRateSlope, isAfterExercise, sleepInsight, sportInsight, stressInsight, zoneOf } from '../src/insights/insights';
+import type { Person } from '../src/profile';
 import type { ScanResult } from '../src/scan';
+
+const aged = (age: number, o: Partial<Person> = {}): Person => ({ age, sex: null, weightKg: null, ...o });
 
 const trend = (from: number, to: number): [number, number][] => Array.from({ length: 100 }, (_, i) => [i * 0.3, from + ((to - from) * i) / 99]);
 const eyes = (o: Partial<EyeStats> = {}): EyeStats => ({
@@ -42,7 +45,7 @@ describe('insights', () => {
     const t = trend(112, 112).map(([s, h]): [number, number] => [s, s > 27 ? h - 25 * ((s - 27) / 3) : h]);
     const slope = heartRateSlope(t);
     expect(slope === null || Math.abs(slope) < 6).toBe(true);
-    expect(sportInsight(result({ heartRate: 110, trend: t }), null).value).not.toBe('Fast recovery');
+    expect(sportInsight(result({ heartRate: 110, trend: t })).value).not.toBe('Fast recovery');
   });
 
   it('recognises a scan right after exercise', () => {
@@ -75,24 +78,46 @@ describe('insights', () => {
 
   it('gives training zones and recovery after a workout', () => {
     expect(zoneOf(140, 30)).toBe('Zone 3 · Moderate'); // max ~187
-    const s = sportInsight(result({ heartRate: 128, trend: trend(136, 124) }), 30);
+    const s = sportInsight(result({ heartRate: 128, trend: trend(136, 124) }), aged(30));
     expect(s.value).toBe('Fast recovery');
     expect(s.zones!.filter((z) => z.current)).toHaveLength(1);
-    expect(sportInsight(result({ heartRate: 128, trend: trend(130, 126) }), null).value).toBe('Still high');
+    expect(sportInsight(result({ heartRate: 128, trend: trend(130, 126) })).value).toBe('Still high');
   });
 
   it('reads a raised pulse without HRV gently (a real post-gym scan: 91 bpm, 11 breaths/min)', () => {
     const r = result({ heartRate: 91, respiration: 11, hrv: null });
     expect(stressInsight(r).value).toBe('Low'); // calm breathing; another app said "Low" too
-    expect(sportInsight(r, null).value).toBe('Pulse raised');
+    expect(sportInsight(r).value).toBe('Pulse raised');
     // The person says they just exercised: no stress reading, recovery view instead.
     expect(stressInsight(r, true).value).toBe('Rest first');
-    expect(sportInsight(r, 30, true).caption).toBe('after workout');
+    expect(sportInsight(r, aged(30), true).caption).toBe('after workout');
+  });
+
+  it('judges HRV against what is typical for the age', () => {
+    const r = result({ heartRate: 64, respiration: 13, hrv: { rmssd: 30, sdnn: 40, beats: 30 } });
+    // 30 ms is on the low side at 22 but typical at 60.
+    expect(stressInsight(r, false, aged(22)).gauge!.value).toBeGreaterThan(stressInsight(r, false, aged(60)).gauge!.value + 0.2);
+    expect(stressInsight(r, false, aged(60)).value).toBe('Low');
+    expect(stressInsight(r, false, aged(60)).caption).toBe('HRV for your age');
+  });
+
+  it('uses sex- and age-adjusted resting norms', () => {
+    const r = result({ heartRate: 67 });
+    expect(sportInsight(r, aged(30, { sex: 'male' }), false).value).toBe('Average fitness');
+    expect(sportInsight(r, aged(30, { sex: 'female' }), false).value).toBe('Good fitness');
+  });
+
+  it('estimates workout calories with weight, age and sex', () => {
+    expect(exerciseKcalPerMin(130, aged(31, { sex: 'male', weightKg: 82 }))!).toBeCloseTo(11.8, 0);
+    expect(exerciseKcalPerMin(130, aged(31, { sex: 'female', weightKg: 62 }))!).toBeCloseTo(7.4, 0);
+    expect(exerciseKcalPerMin(130, aged(31))).toBeNull();
+    const s = sportInsight(result({ heartRate: 128, trend: trend(136, 124) }), aged(31, { sex: 'male', weightKg: 82 }));
+    expect(s.facts.some(([k]) => k === 'Burn at this pulse')).toBe(true);
   });
 
   it('rates resting fitness from the resting heart rate', () => {
-    expect(sportInsight(result({ heartRate: 52 }), null).value).toBe('Excellent fitness');
-    expect(sportInsight(result({ heartRate: 72 }), null).value).toBe('Average fitness');
-    expect(sportInsight(result({ heartRate: 72 }), null).zones).toBeUndefined();
+    expect(sportInsight(result({ heartRate: 52 })).value).toBe('Excellent fitness');
+    expect(sportInsight(result({ heartRate: 72 })).value).toBe('Average fitness');
+    expect(sportInsight(result({ heartRate: 72 })).zones).toBeUndefined();
   });
 });
