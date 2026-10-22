@@ -39,7 +39,8 @@ export interface ScanResult {
   /** Range of heart-rate estimates in the second half of the scan. */
   heartRateRange: [number, number];
   respiration: number | null;
-  hrv: HrvMetrics | null;
+  /** HRV, with how many seconds of the scan were clean enough to time beats (when known). */
+  hrv: (HrvMetrics & { cleanSeconds?: number }) | null;
   /** 0..1 average signal quality. */
   quality: number;
   /** Heart-rate history for the trend chart: [seconds into scan, bpm]. */
@@ -73,17 +74,19 @@ export interface FrameState {
  */
 const MIN_FPS = 5;
 
-export const SCAN_SECONDS = 30;
+/** Scan lengths offered: quick, or long for steadier HRV and stress readings. */
+export const SCAN_LENGTHS = [30, 60] as const;
+export type ScanLength = (typeof SCAN_LENGTHS)[number];
 const ALIGN_HOLD = 0.8;
 
 /**
- * One health scan: waits for a well-placed face, then measures for SCAN_SECONDS of usable
- * frames, keeping the user informed about anything that hurts the reading.
+ * One health scan: waits for a well-placed face, then measures for `seconds` of usable frames,
+ * keeping the user informed about anything that hurts the reading.
  */
 export class ScanSession {
   phase: Phase = 'searching';
   private sampler: SkinSampler | null = null;
-  private readonly estimator = new VitalsEstimator();
+  private readonly estimator: VitalsEstimator;
   private alignedSince: number | null = null;
   private scanned = 0;
   private lastT: number | null = null;
@@ -108,7 +111,13 @@ export class ScanSession {
   private readonly eyes = new EyeAnalyzer();
   private eyeFace: FaceFrame | null = null;
 
-  constructor(private readonly tracker: FaceTracker) {}
+  constructor(
+    private readonly tracker: FaceTracker,
+    readonly seconds: ScanLength = 30,
+  ) {
+    // Keep the whole scan (plus margin) for the final HRV pass.
+    this.estimator = new VitalsEstimator(10, seconds + 10);
+  }
 
   /** Processes the current video frame. `t` is the frame capture time in seconds. */
   step(video: HTMLVideoElement, t: number): FrameState {
@@ -184,7 +193,7 @@ export class ScanSession {
             this.vitals = this.estimator.estimate(this.fps);
             this.record(t);
           }
-          if (this.scanned >= SCAN_SECONDS && this.history.length) this.finish();
+          if (this.scanned >= this.seconds && this.history.length) this.finish();
         }
         break;
       case 'done':
@@ -195,7 +204,7 @@ export class ScanSession {
       phase: this.phase,
       face,
       guidance,
-      progress: Math.min(1, this.scanned / SCAN_SECONDS),
+      progress: Math.min(1, this.scanned / this.seconds),
       vitals: this.phase === 'scanning' ? this.vitals : null,
       result: this.result,
       quality: { signal, motion: motionQ, light },
@@ -244,20 +253,24 @@ export class ScanSession {
 
   private finish(): void {
     // Use the second half of the scan, when the estimate has settled; weight by confidence.
-    const late = this.history.filter((h) => h.t >= SCAN_SECONDS / 2);
+    const late = this.history.filter((h) => h.t >= this.seconds / 2);
     const use = late.length >= 4 ? late : this.history;
-    const wsum = use.reduce((s, h) => s + h.conf, 0) || 1;
-    const hr = use.reduce((s, h) => s + h.hr * h.conf, 0) / wsum;
+    // Confidence-weighted median: a brief excursion (a movement, a glitch) can't pull it.
+    const byHr = use.slice().sort((a, b) => a.hr - b.hr);
+    const wsum = byHr.reduce((s, h) => s + h.conf, 0);
+    let acc = 0;
+    const hr = wsum > 0 ? byHr.find((h) => (acc += h.conf) >= wsum / 2)!.hr : byHr[byHr.length >> 1].hr;
     const hrs = use.map((h) => h.hr).sort((a, b) => a - b);
     const resp = this.respHistory.length ? this.respHistory.slice().sort((a, b) => a - b)[this.respHistory.length >> 1] : null;
     this.result = {
       heartRate: hr,
       heartRateRange: [hrs[Math.floor(hrs.length * 0.1)], hrs[Math.floor(hrs.length * 0.9)]],
       respiration: resp,
-      hrv: this.bestHrv?.hrv ?? null,
+      // HRV from every clean stretch of the scan; else the best clean window seen live.
+      hrv: this.estimator.scanHrv(this.scanFrames / Math.max(1, this.scanned)) ?? this.bestHrv?.hrv ?? null,
       quality: this.qualitySum / Math.max(1, this.qualityN),
       trend: this.history.map((h) => [h.t, h.hr]),
-      durationSec: SCAN_SECONDS,
+      durationSec: this.seconds,
       eyes: this.eyes.stats(),
       fps: this.scanFrames / Math.max(1, this.scanned),
       finishedAt: new Date(),

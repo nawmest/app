@@ -1,9 +1,11 @@
 import './style.css';
 import { CameraError, startFrontCamera, stopCamera } from './camera';
 import { createFaceTracker, type FaceTracker } from './face/landmarker';
-import { GUIDANCE, SCAN_SECONDS, ScanSession, type FrameState } from './scan';
+import { GUIDANCE, SCAN_LENGTHS, type ScanLength, ScanSession, type FrameState } from './scan';
 import { FxRenderer } from './ui/fx';
+import { compareWithLast, entryFrom, loadHistory, saveEntry } from './history';
 import { markProfileOffered, profileOffered } from './profile';
+import { historyRowText, renderHistory } from './ui/history';
 import { wireInsights } from './ui/insights';
 import { openProfileSheet, profileRowText } from './ui/profile';
 import { isAfterExercise } from './insights/insights';
@@ -11,7 +13,7 @@ import { drawTrend, heartRatePill, heartRateStatus, hrvPill, renderResults, summ
 import { WaveRenderer } from './ui/wave';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
-const screens = { intro: $('intro'), loading: $('loading'), scan: $('scan'), results: $('results') };
+const screens = { intro: $('intro'), loading: $('loading'), scan: $('scan'), results: $('results'), history: $('history') };
 const video = $<HTMLVideoElement>('video');
 const fx = new FxRenderer($<HTMLCanvasElement>('fx'));
 const wave = new WaveRenderer($<HTMLCanvasElement>('wave'));
@@ -104,7 +106,7 @@ async function startScan(): Promise<void> {
     return;
   }
   $<HTMLButtonElement>('btn-start').disabled = false;
-  session = new ScanSession(tracker);
+  session = new ScanSession(tracker, scanLength);
   state = null;
   scanStartedAt = null;
   okSince = null;
@@ -245,7 +247,7 @@ function updateCards(v: FrameState['vitals'], dt: number): void {
     ui.respValue.textContent = String(Math.round(v.respiration));
     ui.respSub.textContent = 'breaths/min';
   } else if ((session?.phase ?? '') === 'scanning') {
-    ui.respSub.textContent = (state?.progress ?? 0) * SCAN_SECONDS < 15 ? 'Needs ~15 s' : 'Measuring…';
+    ui.respSub.textContent = (state?.progress ?? 0) * scanLength < 15 ? 'Needs ~15 s' : 'Measuring…';
   }
   if (v.hrv) {
     ui.hrvValue.textContent = String(Math.round(v.hrv.rmssd));
@@ -270,7 +272,7 @@ function updateHud(s: FrameState | null, now: number): void {
   const dots = '.'.repeat(1 + (Math.floor(now * 2) % 3));
   ui.phase.textContent =
     phase === 'scanning' ? `Measuring${dots}` : phase === 'aligning' && g === 'ok' ? 'Hold still' : phase === 'aligning' ? 'Align your face' : 'Looking for your face';
-  ui.timer.textContent = phase === 'scanning' ? `${Math.max(0, Math.ceil(SCAN_SECONDS * (1 - (s?.progress ?? 0))))} s left` : '';
+  ui.timer.textContent = phase === 'scanning' ? `${Math.max(0, Math.ceil(scanLength * (1 - (s?.progress ?? 0))))} s left` : '';
   const q = s ? (phase === 'scanning' ? 0.6 * s.quality.signal + 0.2 * s.quality.motion + 0.2 * s.quality.light : 0.5 * s.quality.motion + 0.5 * s.quality.light) : 0;
   const level = s?.face ? Math.max(1, Math.round(q * 4)) : 0;
   ui.quality.dataset.level = String(level);
@@ -286,12 +288,24 @@ function finish(): void {
   const body = $('results-body');
   const trend = renderResults(body, result);
   let exercised = isAfterExercise(result);
+  // Save to the on-device history and compare with the last scan in the same context.
+  const earlier = loadHistory();
+  const record = () => {
+    const entry = entryFrom(result, exercised);
+    saveEntry(entry);
+    const note = compareWithLast(entry, earlier);
+    $('vs-last').hidden = !note;
+    $('vs-last').textContent = note ?? '';
+    $('history-text').textContent = historyRowText();
+  };
+  record();
   wireInsights(
     body,
     result,
     (e) => {
       exercised = e;
       $('hr-pill').innerHTML = heartRatePill(Math.round(result.heartRate), e);
+      record();
     },
     () => {
       if (result.hrv) $('hrv-pill').innerHTML = hrvPill(result.hrv.rmssd);
@@ -301,6 +315,7 @@ function finish(): void {
   show('results');
   requestAnimationFrame(() => drawTrend(trend, result.trend, result.durationSec));
   $('btn-again').addEventListener('click', startScan);
+  $('btn-results-history').addEventListener('click', openHistory);
   $('btn-copy').addEventListener('click', async (e) => {
     const btn = e.currentTarget as HTMLButtonElement;
     try {
@@ -364,7 +379,42 @@ function updateDebug(s: FrameState | null, now: number): void {
 /* ------------------------------------------------------------------ wiring */
 
 $('btn-start').addEventListener('click', startScan);
+
+// Scan length, remembered on this device.
+const LENGTH_KEY = 'pulselens-length';
+let scanLength: ScanLength = 30;
+try {
+  const saved = Number(localStorage.getItem(LENGTH_KEY));
+  if ((SCAN_LENGTHS as readonly number[]).includes(saved)) scanLength = saved as ScanLength;
+} catch {
+  // Storage blocked: default length.
+}
+function showLength(): void {
+  document.querySelectorAll<HTMLButtonElement>('#scan-length [data-len]').forEach((b) => b.setAttribute('aria-checked', String(Number(b.dataset.len) === scanLength)));
+}
+document.querySelectorAll<HTMLButtonElement>('#scan-length [data-len]').forEach((b) =>
+  b.addEventListener('click', () => {
+    scanLength = Number(b.dataset.len) as ScanLength;
+    showLength();
+    try {
+      localStorage.setItem(LENGTH_KEY, String(scanLength));
+    } catch {
+      // Ignore.
+    }
+  }),
+);
+showLength();
 $('profile-text').textContent = profileRowText();
+$('history-text').textContent = historyRowText();
+function openHistory(): void {
+  renderHistory($('history-body'), () => {
+    $('history-text').textContent = historyRowText();
+    show('intro');
+  });
+  show('history');
+  screens.history.scrollTop = 0;
+}
+$('btn-history').addEventListener('click', openHistory);
 $('btn-profile').addEventListener('click', async () => {
   markProfileOffered();
   await openProfileSheet();

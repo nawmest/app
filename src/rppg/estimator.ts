@@ -1,4 +1,4 @@
-import { bandpass, dominantFrequency, findPeaks, hrvFromBeats, type HrvMetrics, resampleUniform } from './dsp';
+import { bandpass, dominantFrequency, findPeaks, hrvFromBeats, hrvFromIntervals, type HrvMetrics, resampleUniform } from './dsp';
 import { type MotionInfo, type Pose, suppressMotion } from './motion';
 import { pos } from './pos';
 
@@ -47,6 +47,18 @@ export const HRV_MIN_SNR = 5;
 /** Maps the pulse SNR (dB) to a 0..1 confidence. ~-6 dB is barely usable, +3 dB is excellent. */
 export const confidenceFromSnr = (snr: number) => Math.max(0, Math.min(1, (snr + 8) / 11));
 
+/** HRV from a whole scan, with how much of it was clean enough to time beats. */
+export interface ScanHrv extends HrvMetrics {
+  cleanSeconds: number;
+}
+
+/** Peaks of the pulse's steepest upstrokes: beat times as sample indices. */
+function upstrokes(pulse: Float64Array, fs: number, hr: number | null): number[] {
+  const slope = new Float64Array(pulse.length);
+  for (let i = 1; i < pulse.length - 1; i++) slope[i] = (pulse[i + 1] - pulse[i - 1]) / 2;
+  return findPeaks(slope, fs, hr ? (0.6 * 60) / hr : 0.3);
+}
+
 /**
  * Continuous vital-sign estimation from a stream of frame samples: POS pulse extraction over a
  * sliding window, spectral heart rate with quality gating and smoothing, beat detection for HRV,
@@ -87,6 +99,59 @@ export class VitalsEstimator {
     let drop = 0;
     while (drop < this.samples.length && this.samples[drop].t < cutoff) drop++;
     if (drop) this.samples.splice(0, drop);
+  }
+
+  /**
+   * HRV over everything kept (the whole scan). Beats are timed on the full pulse signal, but only
+   * intervals inside clean stretches count: 10 s windows whose pulse SNR reaches `minSnr` at the
+   * scan's heart rate. A noisy moment then costs only its own beats, not the whole reading.
+   */
+  scanHrv(frameRate = SAMPLE_RATE, minSnr = HRV_MIN_SNR): ScanHrv | null {
+    if (this.duration < 15) return null;
+    const fs = SAMPLE_RATE;
+    const hrHi = Math.max(HR_BAND[0] + 0.5, Math.min(HR_BAND[1], 0.45 * frameRate));
+    const hasPose = this.samples.every((s) => s.pose);
+    const all = resampleUniform(
+      this.samples.map((s) => s.t),
+      [0, 1, 2].map((c) => this.samples.map((s) => s.rgb[c])).concat(hasPose ? [0, 1, 2, 3, 4, 5].map((c) => this.samples.map((s) => s.pose![c])) : []),
+      fs,
+    );
+    const [r, g, b, ...poseCh] = all.channels;
+    let pulse = bandpass(pos(r, g, b, fs).map((v) => -v), fs, HR_BAND[0], hrHi);
+    if (hasPose) pulse = suppressMotion(pulse, poseCh, 0, fs, HR_BAND[0], hrHi).clean;
+    const N = pulse.length;
+    const overall = dominantFrequency(pulse, fs, HR_BAND[0], hrHi);
+    if (!overall) return null;
+
+    // Clean windows, every second.
+    const W = Math.round(10 * fs);
+    const step = fs;
+    const clean: boolean[] = [];
+    for (let s0 = 0; s0 + W <= N; s0 += step) {
+      const p = dominantFrequency(pulse.subarray(s0, s0 + W), fs, HR_BAND[0], hrHi);
+      clean.push(!!p && p.snr >= minSnr && Math.abs(p.freq - overall.freq) < 0.12 * overall.freq);
+    }
+    if (!clean.length) return null;
+    // A sample belongs to the window centred nearest to it.
+    const isClean = (i: number) => clean[Math.max(0, Math.min(clean.length - 1, Math.round((i - W / 2) / step)))];
+
+    const beats = upstrokes(pulse, fs, overall.freq * 60);
+    const runs: number[][] = [];
+    let run: number[] = [];
+    for (let k = 1; k < beats.length; k++) {
+      if (isClean(beats[k - 1]) && isClean(beats[k])) run.push(((beats[k] - beats[k - 1]) / fs) * 1000);
+      else if (run.length) {
+        runs.push(run);
+        run = [];
+      }
+    }
+    if (run.length) runs.push(run);
+    let cleanSamples = 0;
+    for (let i = 0; i < N; i++) if (isClean(i)) cleanSamples++;
+    const cleanSeconds = cleanSamples / fs;
+    if (cleanSeconds < 12) return null;
+    const hrv = hrvFromIntervals(runs);
+    return hrv && { ...hrv, cleanSeconds };
   }
 
   /**
@@ -160,11 +225,7 @@ export class VitalsEstimator {
 
     // Beats are timed at the steepest point of each systolic upstroke (the peak of the first
     // derivative), which is sharper and less noise-sensitive than the rounded top of the wave.
-    const minGap = hr ? (0.6 * 60) / hr : 0.3;
-    const slope = new Float64Array(pulse.length);
-    for (let i = 1; i < pulse.length - 1; i++) slope[i] = (pulse[i + 1] - pulse[i - 1]) / 2;
-    const peaks = findPeaks(slope, fs, minGap);
-    const beats = peaks.map((i) => all.t0 + i / fs);
+    const beats = upstrokes(pulse, fs, hr).map((i) => all.t0 + i / fs);
     // Beat-to-beat timing is far more noise-sensitive than the average rate: only report HRV
     // from a clean signal.
     const hrv = hr && snr >= HRV_MIN_SNR ? hrvFromBeats(beats.filter((t) => t > tEnd - 30)) : null;

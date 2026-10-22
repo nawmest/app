@@ -70,7 +70,7 @@ function sheetBody(i: Insight, age: number | null): string {
     ${facts}
     ${sport}
     <p class="tip">${esc(i.tip)}</p>
-    <p class="sheet-note">A wellness estimate from a 30-second camera scan, not a medical measurement.</p>`;
+    <p class="sheet-note">A wellness estimate from a camera scan, not a medical measurement.</p>`;
 }
 
 /**

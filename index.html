@@ -32,7 +32,7 @@
         <p class="eyebrow">Contactless vitals</p>
         <h1>PulseLens</h1>
         <p class="lead">
-          A 30-second face scan with your front camera. PulseLens reads the tiny colour changes your
+          A 30- or 60-second face scan with your front camera. PulseLens reads the tiny colour changes your
           heartbeat makes in your skin and turns them into vital signs.
         </p>
         <ul class="features">
@@ -41,9 +41,16 @@
           <li><span class="dot hrv"></span><b>Heart rate variability</b><span>RMSSD, when the signal allows</span></li>
           <li><span class="dot well"></span><b>Stress, sleep &amp; sport</b><span>simple insights after each scan</span></li>
         </ul>
+        <div class="length" id="scan-length" role="radiogroup" aria-label="Scan length">
+          <button type="button" role="radio" aria-checked="true" data-len="30"><b>30 s</b><span>Quick check</span></button>
+          <button type="button" role="radio" aria-checked="false" data-len="60"><b>60 s</b><span>Best for HRV &amp; stress</span></button>
+        </div>
         <button id="btn-start" class="btn primary" type="button">Start face scan</button>
         <button id="btn-profile" class="profile-row" type="button">
           <span class="tile-ico user-ico" aria-hidden="true"></span><span id="profile-text">Add your profile (optional)</span><span class="chev" aria-hidden="true">›</span>
+        </button>
+        <button id="btn-history" class="profile-row" type="button">
+          <span class="tile-ico history-ico" aria-hidden="true"></span><span id="history-text">History</span><span class="chev" aria-hidden="true">›</span>
         </button>
         <p id="intro-error" class="error" role="alert" hidden></p>
         <p class="fineprint">
@@ -105,6 +112,11 @@
     <!-- Results -->
     <section id="results" class="screen results" hidden>
       <div class="results-inner" id="results-body"></div>
+    </section>
+
+    <!-- History -->
+    <section id="history" class="screen results" hidden>
+      <div class="results-inner" id="history-body"></div>
     </section>
 
     <script type="module" src="/src/main.ts"></script>

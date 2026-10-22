@@ -109,6 +109,10 @@ button {
   --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='8' r='4.2'/%3E%3Cpath d='M3.5 21c.6-4.6 4-7.3 8.5-7.3s7.9 2.7 8.5 7.3z'/%3E%3C/svg%3E");
 }
 
+.history-ico {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M3 12a9 9 0 1 0 2.6-6.4M3 4v4.5h4.5M12 7.5V12l3 2'/%3E%3C/svg%3E");
+}
+
 .x-ico {
   --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M6 6l12 12M18 6L6 18'/%3E%3C/svg%3E");
 }
@@ -1282,6 +1286,51 @@ button {
   font-size: 11.5px;
 }
 
+/* Scan length: two choices above the start button. */
+.length {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.length button {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.length b {
+  color: var(--text);
+  font-size: 15px;
+}
+
+.length span {
+  font-size: 12px;
+}
+
+.length button[aria-checked='true'] {
+  border-color: rgba(76, 242, 210, 0.55);
+  background: rgba(76, 242, 210, 0.08);
+}
+
+.length button[aria-checked='true'] b {
+  color: var(--accent);
+}
+
+.length button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* Profile: one row on the start screen, a form in a bottom sheet. */
 .profile-row {
   display: flex;
@@ -1300,6 +1349,7 @@ button {
   cursor: pointer;
 }
 
+.profile-row .history-ico,
 .profile-row .user-ico {
   width: 16px;
   height: 16px;
@@ -1386,6 +1436,94 @@ button {
   font-size: 13.5px;
   font-weight: 600;
   cursor: pointer;
+}
+
+/* History */
+.vs-last {
+  margin: 10px 0 0;
+  color: var(--text);
+  font-size: 13.5px;
+}
+
+.link-btn.centered {
+  justify-self: center;
+  margin-top: 0;
+}
+
+.link-btn.back {
+  margin: 0 0 6px;
+}
+
+.h-count {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.h-chart {
+  display: block;
+  width: 100%;
+  height: 120px;
+  margin-top: 10px;
+}
+
+.h-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.h-list li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.h-when {
+  display: grid;
+  gap: 2px;
+}
+
+.h-when b {
+  font-size: 14px;
+}
+
+.h-when span {
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.h-tag {
+  align-self: start;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.h-tag.workout {
+  background: rgba(70, 227, 154, 0.12);
+  color: var(--sport);
+}
+
+.h-vals {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.h-vals b {
+  color: var(--text);
+  font-size: 16px;
 }
 
 /* Lite mode (performance governor): no live blur behind glass panels. */

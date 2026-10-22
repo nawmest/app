@@ -1,7 +1,7 @@
 # PulseLens
 
 An AR health check in the browser. PulseLens scans your face with the phone's **front camera**
-for 30 seconds and measures **heart rate**, **breathing rate** and, when the signal allows,
+for 30 or 60 seconds and measures **heart rate**, **breathing rate** and, when the signal allows,
 **heart rate variability (HRV)**. The readings float beside your face in an AR overlay while a
 face-mesh scan animation runs. The results add three simple wellness insights: **stress**,
 **sleep** (tiredness) and **sport** (training zone, recovery, resting fitness).
@@ -57,9 +57,15 @@ front camera ─► MediaPipe Face Landmarker (478-point face mesh, on-device)
   pitch, roll), its squares and, for large motion, its cubes are band-passed like the pulse and
   regressed out of it. References that only show tracking jitter are left out, so a still head
   is unaffected.
-* **HRV** is only reported when the pulse SNR is at least 5 dB. Tests show that below that,
-  beat-timing noise roughly doubles RMSSD, so the app says "needs a steadier signal" instead of
-  showing a wrong number.
+* **HRV** is only computed from clean signal: the final pass over the whole scan
+  (`VitalsEstimator.scanHrv`) checks every 10 s window (in 1 s steps) and keeps only beat
+  intervals inside windows whose pulse SNR is at least 5 dB at the scan's heart rate. A noisy
+  moment then costs only its own beats, not the whole reading, and the results say how many
+  seconds were clean. Tests show that using noisy beats inflates RMSSD (in one simulation 88 ms
+  against a true 50), so with too little clean signal the app says "needs a steadier signal".
+  The 60 s scan gives it more chances.
+* **Final heart rate**: the confidence-weighted median of the estimates in the second half of
+  the scan, so a brief excursion can't pull it.
 * **Breathing** comes from the slight up-and-down head motion and the slow colour baseline
   (respiratory-induced intensity variation), whichever has the cleaner spectrum.
 * **Guidance and safety nets** (`src/scan.ts`): the scan only starts once the face is centred,
@@ -96,6 +102,15 @@ stress nor low fitness.
   and how fast the heart rate is falling during the scan, a well-known fitness sign. The slope is
   a median of pairwise slopes, checked against the first and last thirds, so a glitch can't fake
   a fast recovery. At rest it rates fitness from the resting heart rate.
+
+### Scan length and history
+
+The start screen offers a **30 s** quick check or a **60 s** scan, which gives HRV (and so the
+stress reading) more often; the choice is remembered. Every finished scan is saved on the phone
+(`src/history.ts`): the results compare the heart rate with the last scan in the same context
+(rest with rest, workout with workout), and the History screen charts resting heart rate and
+HRV over time, with the 7-day resting average and a list of scans. It can be cleared at any
+time.
 
 ### Profile
 
@@ -163,7 +178,8 @@ phones keep tabs open and GitHub Pages lets browsers cache the page.
 
 ### Tests
 
-* `tests/profile.test.ts`: profile validation, age and BMI. `tests/eyes.test.ts`: blink rate and length, drooping lids, yawns, long closures, a raised
+* `tests/history.test.ts`: saving, ordering, comparisons and the resting average.
+  `tests/profile.test.ts`: profile validation, age and BMI. `tests/eyes.test.ts`: blink rate and length, drooping lids, yawns, long closures, a raised
   open-eye level, and the closed-eyes and slow-camera flags. `tests/insights.test.ts`: the
   stress, sleep and sport assessments, after-exercise detection, the recovery slope, age-adjusted
   HRV, sex-adjusted resting norms and workout calories.
@@ -178,7 +194,8 @@ phones keep tabs open and GitHub Pages lets browsers cache the page.
 * `e2e/run.mjs` runs the built app in Chromium with `e2e/fake-front-camera.js`, a synthetic front
   camera filming a rendered head whose skin pulses at a known rate (default 78 bpm, `BPM=90` to
   change), with natural sway and breathing motion. It checks the no-face guidance, alignment,
-  live readings, the final heart rate (±5 bpm) and the results screen. In this environment the
+  live readings, the final heart rate (±5 bpm), the results screen, the insights and their
+  sheets, the profile form and the history (`LENGTH=60` runs a 60 s scan). In this environment the
   result was 77–80 bpm and breathing 15.0/min against 15 simulated.
 
   This headless browser only manages about 7 camera frames per second. That is enough for resting

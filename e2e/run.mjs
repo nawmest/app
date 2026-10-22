@@ -9,6 +9,7 @@ import { chromium } from 'playwright';
 import { serve } from './serve.mjs';
 
 const BPM = Number(process.env.BPM ?? 78);
+const LENGTH = Number(process.env.LENGTH ?? 30);
 const out = resolve('test-output');
 await mkdir(out, { recursive: true });
 const server = await serve();
@@ -21,6 +22,13 @@ const head = await readFile(resolve('e2e/fixtures/head.png'));
 await page.route('**/e2e/fixtures/head.png', (r) => r.fulfill({ contentType: 'image/png', body: head }));
 await page.addInitScript((bpm) => (window.__fakeCamConfig = { bpm }), BPM);
 await page.addInitScript({ path: resolve('e2e/fake-front-camera.js') });
+// Earlier scans in the on-device history (once: the app adds to it).
+await page.addInitScript(() => {
+  if (localStorage.getItem('pulselens-history')) return;
+  const day = 86400000;
+  const e = (daysAgo, hr, rmssd) => ({ at: Date.now() - daysAgo * day, heartRate: hr, respiration: 14, rmssd, quality: 0.7, durationSec: 60, exercised: false });
+  localStorage.setItem('pulselens-history', JSON.stringify([e(6, 74, 38), e(4, 71, 44), e(1, 70, 41)]));
+});
 // The software GPU in headless Chromium is very slow; use MediaPipe's CPU path here.
 await page.goto(`${server.url}?delegate=cpu`);
 
@@ -36,6 +44,7 @@ await page.screenshot({ path: join(out, '0-intro.png') });
 
 // Nobody in front of the camera: the app asks for a face and doesn't start measuring.
 await page.evaluate(() => (window.__fakeCam.state.present = false));
+await page.click(`#scan-length [data-len="${LENGTH}"]`);
 await page.click('#btn-start');
 // First start: the optional profile is offered once.
 check(await waitFor(() => !!document.querySelector('#profile-sheet[open]'), null, 5000), 'offers the optional profile before the first scan');
@@ -92,6 +101,18 @@ await page.click('#results .tile.stress');
 await page.waitForTimeout(400);
 await page.screenshot({ path: join(out, '7-stress-sheet.png') });
 await page.click('#sheet .sheet-close');
+
+// History: the scan was saved and compared with the last resting scan.
+const vs = await page.textContent('#vs-last');
+check(/resting scan \(yesterday\)/.test(vs ?? ''), `compares with the last resting scan: "${vs}"`);
+await page.click('#btn-results-history');
+check(await page.isVisible('#history'), 'opens the history');
+check((await page.$$('#history .h-list li')).length === 4, 'history lists this scan and the 3 earlier ones');
+check((await page.$$('#history canvas.h-chart')).length === 2, 'history charts resting heart rate and HRV');
+await page.waitForTimeout(300);
+await page.screenshot({ path: join(out, '8-history.png'), fullPage: true });
+await page.click('#history-back');
+check((await page.textContent('#history-text')).includes('4 scans'), 'start screen shows the history count');
 
 check(errors.length === 0, `no page errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
 await browser.close();

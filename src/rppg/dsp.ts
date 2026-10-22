@@ -241,19 +241,28 @@ export interface HrvMetrics {
 export function hrvFromBeats(beatTimes: number[]): HrvMetrics | null {
   const ibi: number[] = [];
   for (let i = 1; i < beatTimes.length; i++) ibi.push((beatTimes[i] - beatTimes[i - 1]) * 1000);
-  if (ibi.length < 8) return null;
-  const sorted = [...ibi].sort((a, b) => a - b);
+  return hrvFromIntervals([ibi]);
+}
+
+/**
+ * Time-domain HRV from runs of consecutive inter-beat intervals (ms). Successive differences are
+ * only taken within a run, so separate clean stretches of a recording can be combined.
+ */
+export function hrvFromIntervals(runs: number[][]): HrvMetrics | null {
+  const all = runs.flat();
+  if (all.length < 8) return null;
+  const sorted = [...all].sort((a, b) => a - b);
   const med = sorted[sorted.length >> 1];
-  const ok = ibi.map((v) => Math.abs(v - med) <= 0.2 * med);
-  const nn = ibi.filter((_, i) => ok[i]);
+  const good = (v: number) => Math.abs(v - med) <= 0.2 * med;
+  const nn = all.filter(good);
   if (nn.length < 8) return null;
   let diffs: number[] = [];
-  for (let i = 1; i < ibi.length; i++) if (ok[i] && ok[i - 1]) diffs.push(ibi[i] - ibi[i - 1]);
+  for (const ibi of runs) for (let i = 1; i < ibi.length; i++) if (good(ibi[i]) && good(ibi[i - 1])) diffs.push(ibi[i] - ibi[i - 1]);
   // Drop successive differences that are outliers (> 3.5 robust standard deviations).
   const absd = diffs.map(Math.abs).sort((a, b) => a - b);
   const mad = absd[absd.length >> 1] * 1.4826;
   if (mad > 0) diffs = diffs.filter((d) => Math.abs(d) <= 3.5 * mad);
   if (diffs.length < 6) return null;
   const rmssd = Math.sqrt(diffs.reduce((s, d) => s + d * d, 0) / diffs.length);
-  return { rmssd, sdnn: std(nn), beats: nn.length + 1 };
+  return { rmssd, sdnn: std(nn), beats: nn.length + runs.length };
 }

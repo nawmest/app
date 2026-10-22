@@ -79,8 +79,9 @@ export function renderResults(root: HTMLElement, r: ScanResult): HTMLCanvasEleme
       <div class="big"><span class="num">${hr}</span><span class="unit">bpm</span></div>
       <span id="hr-pill">${heartRatePill(hr, isAfterExercise(r))}</span>
       ${rangeBar(hr, 40, 140, 60, 100, 'var(--hr)')}
+      <p class="vs-last" id="vs-last" hidden></p>
       <canvas id="trend" aria-label="Heart rate during the scan"></canvas>
-      <p class="mini-note">Varied between ${Math.round(r.heartRateRange[0])} and ${Math.round(r.heartRateRange[1])} bpm over the last 15 seconds.</p>
+      <p class="mini-note">Varied between ${Math.round(r.heartRateRange[0])} and ${Math.round(r.heartRateRange[1])} bpm over the last ${Math.round(r.durationSec / 2)} seconds.</p>
     </section>
 
     ${insightsHtml(r)}
@@ -98,8 +99,12 @@ export function renderResults(root: HTMLElement, r: ScanResult): HTMLCanvasEleme
         <div class="panel-title"><span class="wave-ico" style="color:var(--hrv)"></span>HRV · RMSSD</div>
         ${
           r.hrv
-            ? `<div class="big"><span class="num">${Math.round(r.hrv.rmssd)}</span><span class="unit">ms</span></div><span id="hrv-pill">${pill(hrvStatus(r.hrv.rmssd))}</span>`
-            : `<div class="big"><span class="num">—</span></div>${pill({ text: 'Needs a steadier signal', tone: 'muted' })}`
+            ? `<div class="big"><span class="num">${Math.round(r.hrv.rmssd)}</span><span class="unit">ms</span></div><span id="hrv-pill">${pill(hrvStatus(r.hrv.rmssd))}</span>${
+                r.hrv.cleanSeconds ? `<p class="mini-note">From ${Math.round(r.hrv.cleanSeconds)} s of clean signal</p>` : ''
+              }`
+            : `<div class="big"><span class="num">—</span></div>${pill({ text: 'Needs a steadier signal', tone: 'muted' })}${
+                r.durationSec < 60 ? '<p class="mini-note">A 60 s scan gives HRV more often</p>' : ''
+              }`
         }
       </section>
     </div>
@@ -132,6 +137,7 @@ export function renderResults(root: HTMLElement, r: ScanResult): HTMLCanvasEleme
       <button class="btn" id="btn-copy" type="button">Copy summary</button>
       <button class="btn primary" id="btn-again" type="button">Scan again</button>
     </div>
+    <button class="link-btn centered" id="btn-results-history" type="button">See your history ›</button>
   `;
   return root.querySelector('#trend') as HTMLCanvasElement;
 }

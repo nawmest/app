@@ -41,6 +41,8 @@ interface SimOptions {
    * skin with it, including a harmonic at twice the breathing rate. Needs `breathsPerMin`.
    */
   heave?: { pitch: number; shading: number };
+  /** Stretches with a different noise level: [from s, to s, noise]. */
+  noisyBetween?: [number, number, number][];
   /** Slow hand-held camera drift (face position, face heights) with a matching light gradient. */
   drift?: number;
   seed?: number;
@@ -67,6 +69,7 @@ function simulate(o: SimOptions) {
   const pbv = [0.33, 0.77, 0.53]; // relative pulsatile strength per channel (blood volume pulse)
   const a = o.pulseAmplitude ?? 0.008;
   const samples: { t: number; rgb: [number, number, number]; motionY: number; pose: Pose }[] = [];
+  const noiseAt = (t: number) => o.noisyBetween?.find(([a, b]) => t >= a && t < b)?.[2] ?? o.noise ?? 0.5;
   let ft = 0;
   while (ft < o.seconds) {
     const p = pulseAt(ft);
@@ -86,7 +89,7 @@ function simulate(o: SimOptions) {
     // Rocking also changes how much light reaches the skin under the surface (and the blood
     // seen through it), which looks like a blood volume change: POS can't remove it.
     const heaveTint = [0.4, 0.75, 0.5];
-    const rgb = base.map((v, c) => v * light * (1 + dist * tint[c] + heave * heaveTint[c]) * (1 - a * pbv[c] * p) + (r() - 0.5) * (o.noise ?? 0.5)) as [number, number, number];
+    const rgb = base.map((v, c) => v * light * (1 + dist * tint[c] + heave * heaveTint[c]) * (1 - a * pbv[c] * p) + (r() - 0.5) * noiseAt(ft)) as [number, number, number];
     const jit = () => (r() - 0.5) * 0.004; // landmark jitter
     const pose: Pose = [dx + jit(), 0.4 * pitch + 0.002 * breath + jit(), 0.7 + jit(), jit() * 2, pitch + jit() * 2, jit() * 2];
     samples.push({ t: ft, rgb, motionY: 0.002 * breath + 0.4 * pitch + 0.0005 * (r() - 0.5), pose });
@@ -274,6 +277,28 @@ describe('VitalsEstimator', () => {
     const v = est.estimate()!;
     expect(Math.abs(v.heartRate! - 66)).toBeLessThan(3);
     expect(v.hrv).toBeNull();
+  });
+
+  it('measures HRV over the whole scan from its clean stretches', () => {
+    // 60 s scan: noisy first 18 s and last 15 s (e.g. talking, shifting), clean in between.
+    const { samples, beats } = simulate({ bpm: 70, seconds: 60, rrJitterMs: 35, noise: 0.2, noisyBetween: [[0, 18, 1.4], [45, 60, 1.4]], seed: 12 });
+    const est = new VitalsEstimator(10, 70);
+    for (const s of samples) est.push(s);
+    expect(est.estimate()!.hrv).toBeNull(); // the last window is noisy
+    const h = est.scanHrv()!;
+    expect(h).not.toBeNull();
+    const truth = hrvFromBeats(beats.filter((t) => t > 18 && t < 45))!;
+    expect(h.rmssd).toBeGreaterThan(truth.rmssd * 0.7);
+    expect(h.rmssd).toBeLessThan(truth.rmssd * 1.4);
+    expect(h.cleanSeconds).toBeGreaterThan(15);
+    expect(h.cleanSeconds).toBeLessThan(40);
+  });
+
+  it('gives no whole-scan HRV when no stretch is clean', () => {
+    const { samples } = simulate({ bpm: 66, seconds: 60, rrJitterMs: 30, noise: 1.4, seed: 3 });
+    const est = new VitalsEstimator(10, 70);
+    for (const s of samples) est.push(s);
+    expect(est.scanHrv()).toBeNull();
   });
 
   it('estimates HRV and breathing rate from a clean signal', () => {
