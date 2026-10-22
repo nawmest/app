@@ -169,6 +169,7 @@ export function summaryText(r: ScanResult): string {
     `HRV (RMSSD): ${r.hrv ? `${Math.round(r.hrv.rmssd)} ms` : 'not measured'}`,
     `Signal quality: ${Math.round(r.quality * 100)}%`,
     'Camera-based estimate for wellness only, not a medical measurement.',
+    `PulseLens ${__BUILD__}`,
   ];
   return lines.join('\n');
 }

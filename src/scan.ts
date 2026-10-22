@@ -96,6 +96,7 @@ export class ScanSession {
   private lastFace: FaceFrame | null = null;
   private lastFaceT = 0;
   private fps = 30;
+  private faceH = 1;
 
   constructor(private readonly tracker: FaceTracker) {}
 
@@ -125,6 +126,7 @@ export class ScanSession {
         this.motion += (speed - this.motion) * Math.min(1, dt * 4);
       }
       this.lastCenter = center;
+      this.faceH = faceH;
       sample = this.sampler.sample(video, face.points);
       const lum = sample?.luminance ?? 0;
       light = sample ? Math.max(0, Math.min(1, (lum - 40) / 50)) * (1 - Math.min(1, sample.clipped * 4)) : 0;
@@ -158,7 +160,8 @@ export class ScanSession {
       case 'scanning':
         // Small problems lower quality but don't stop the scan; losing the face pauses it.
         if (face && sample && guidance !== 'no-face' && guidance !== 'too-far' && guidance !== 'off-center' && guidance !== 'slow') {
-          this.estimator.push({ t, rgb: sample.rgb, motionY: (this.lastCenter![1] / h) });
+          const [c, fh] = [this.lastCenter!, this.faceH];
+          this.estimator.push({ t, rgb: sample.rgb, motionY: c[1] / h, pose: [c[0] / fh, c[1] / fh, fh / h, face.yaw, face.pitch, face.roll] });
           this.scanned += dt;
           if (t - this.lastEstimate > 0.25) {
             this.lastEstimate = t;

@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process';
 import { createReadStream, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
@@ -33,11 +34,33 @@ function mediapipeWasm(): Plugin {
   };
 }
 
+/** Build id shown in the app (commit and date), also published as version.json for updates. */
+function buildId(): string {
+  let sha = process.env.GITHUB_SHA?.slice(0, 7);
+  try {
+    sha ??= execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+  } catch {
+    sha = 'dev';
+  }
+  return `${sha} · ${new Date().toISOString().slice(0, 10)}`;
+}
+const BUILD = buildId();
+
+function versionFile(): Plugin {
+  return {
+    name: 'version-file',
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'version.json', source: JSON.stringify({ build: BUILD }) });
+    },
+  };
+}
+
 // Camera access requires a secure context. `npm run dev` serves over HTTPS with a self-signed
 // certificate so the app can be opened from a phone on the same network.
 // Set NO_HTTPS=1 to serve plain HTTP (localhost counts as a secure context).
 export default defineConfig(({ command }) => ({
   base: './',
-  plugins: [mediapipeWasm(), ...(command === 'serve' && !process.env.NO_HTTPS ? [basicSsl()] : [])],
+  define: { __BUILD__: JSON.stringify(BUILD) },
+  plugins: [mediapipeWasm(), versionFile(), ...(command === 'serve' && !process.env.NO_HTTPS ? [basicSsl()] : [])],
   build: { target: 'es2022', chunkSizeWarningLimit: 1000 },
 }));

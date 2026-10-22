@@ -1,4 +1,5 @@
 import { bandpass, dominantFrequency, findPeaks, hrvFromBeats, type HrvMetrics, resampleUniform } from './dsp';
+import { type MotionInfo, type Pose, suppressMotion } from './motion';
 import { pos } from './pos';
 
 /** One analysed camera frame. */
@@ -9,6 +10,8 @@ export interface FrameSample {
   rgb: [number, number, number];
   /** Vertical head position relative to face height (breathing moves it slightly). */
   motionY: number;
+  /** Head pose, for removing motion artefacts (see `suppressMotion`). */
+  pose?: Pose;
 }
 
 export interface Vitals {
@@ -27,11 +30,17 @@ export interface Vitals {
   /** Breaths per minute (estimate), or null. */
   respiration: number | null;
   respirationConfidence: number;
+  /** Unsmoothed heart rate from this window (bpm), for diagnostics. */
+  rawHeartRate: number | null;
+  /** Head-motion analysis, when pose was supplied. */
+  motion: MotionInfo | null;
 }
 
 export const SAMPLE_RATE = 30;
 const HR_BAND: [number, number] = [0.65, 3.5]; // 39-210 bpm
 const RESP_BAND: [number, number] = [0.1, 0.6]; // 6-36 breaths/min
+/** Head motion can follow faster breathing (after exercise) without confusing it with the pulse. */
+const RESP_MOTION_HI = 0.75; // 45 breaths/min
 /** Minimum pulse SNR (dB) for HRV; below it timing noise inflates RMSSD (see tests). */
 export const HRV_MIN_SNR = 5;
 
@@ -91,20 +100,33 @@ export class VitalsEstimator {
     const hrHi = Math.max(HR_BAND[0] + 0.5, Math.min(HR_BAND[1], 0.45 * frameRate));
     const tEnd = this.samples[n - 1].t;
     const times = this.samples.map((s) => s.t);
+    const hasPose = this.samples.every((s) => s.pose);
     const all = resampleUniform(
       times,
-      [this.samples.map((s) => s.rgb[0]), this.samples.map((s) => s.rgb[1]), this.samples.map((s) => s.rgb[2]), this.samples.map((s) => s.motionY)],
+      [
+        this.samples.map((s) => s.rgb[0]),
+        this.samples.map((s) => s.rgb[1]),
+        this.samples.map((s) => s.rgb[2]),
+        this.samples.map((s) => s.motionY),
+        ...(hasPose ? [0, 1, 2, 3, 4, 5].map((c) => this.samples.map((s) => s.pose![c])) : []),
+      ],
       fs,
     );
-    const [r, g, b, my] = all.channels;
+    const [r, g, b, my, ...poseCh] = all.channels;
     const N = r.length;
 
     // Pulse over the whole history, band-limited to plausible heart rates. POS output falls as
     // blood volume rises (skin absorbs more), so flip it to make systolic peaks maxima.
     const pulse = bandpass(pos(r, g, b, fs).map((v) => -v), fs, HR_BAND[0], hrHi);
     const hrStart = Math.max(0, N - Math.round(this.hrWindow * fs));
+    let motion: MotionInfo | null = null;
+    if (hasPose) {
+      const m = suppressMotion(pulse, poseCh, hrStart, fs, HR_BAND[0], hrHi);
+      pulse.set(m.clean, hrStart);
+      motion = m.info;
+    }
     const hrSeg = pulse.subarray(hrStart);
-    const peak = dominantFrequency(hrSeg, fs, HR_BAND[0], hrHi);
+    const peak = dominantFrequency(hrSeg, fs, HR_BAND[0], hrHi, true);
     const snr = peak?.snr ?? -20;
     const confidence = confidenceFromSnr(snr);
 
@@ -154,8 +176,10 @@ export class VitalsEstimator {
     if (this.duration >= 15) {
       const start = Math.max(0, N - Math.round(30 * fs));
       const lp = 0.08;
-      const cand = [bandpass(my.subarray(start), fs, lp, RESP_BAND[1]), bandpass(g.subarray(start), fs, lp, RESP_BAND[1])]
-        .map((x) => dominantFrequency(x, fs, RESP_BAND[0], RESP_BAND[1], false))
+      const cand = [
+        dominantFrequency(bandpass(my.subarray(start), fs, lp, RESP_MOTION_HI), fs, RESP_BAND[0], RESP_MOTION_HI, false),
+        dominantFrequency(bandpass(g.subarray(start), fs, lp, RESP_BAND[1]), fs, RESP_BAND[0], RESP_BAND[1], false),
+      ]
         .filter((p): p is NonNullable<typeof p> => !!p)
         .sort((p, q) => q.snr - p.snr);
       if (cand.length) {
@@ -182,6 +206,8 @@ export class VitalsEstimator {
       hrv,
       respiration,
       respirationConfidence,
+      rawHeartRate: peak ? peak.freq * 60 : null,
+      motion,
     };
   }
 }

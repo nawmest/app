@@ -26,6 +26,7 @@ front camera ─► MediaPipe Face Landmarker (478-point face mesh, on-device)
                  ├─► measurement regions: forehead + both cheeks (convex hulls of mesh points)
                  │     └─► mean skin colour per frame (over-exposed and very dark pixels skipped)
                  │           └─► resample to 30 Hz ─► POS algorithm ─► band-pass 0.65–3.5 Hz
+                 │                 ─► remove head-motion artefacts (regression on head pose)
                  │                 ├─► spectrum peak (+ SNR) ─► heart rate, signal quality
                  │                 └─► steepest upstroke of each beat ─► beat times ─► HRV (RMSSD)
                  ├─► head motion + slow colour baseline ─► band-pass 0.1–0.6 Hz ─► breathing rate
@@ -48,6 +49,13 @@ front camera ─► MediaPipe Face Landmarker (478-point face mesh, on-device)
   by noise near half its rate. The signal-to-noise ratio (de Haan's definition) becomes a
   confidence score, and each new estimate is smoothed in proportion to its quality. When five
   consecutive estimates agree on a clearly different rate, the reading re-locks to it at once.
+* **Motion artefacts** (`src/rppg/motion.ts`): heavy breathing after exercise rocks the head,
+  and the light on the skin changes with it at the breathing rate and its harmonics. POS can't
+  remove this when it looks like a blood volume change, and it can outweigh the pulse: breathing
+  at 32/min then reads as a 64 bpm "pulse". The face tracker's head pose (position, size, yaw,
+  pitch, roll), its squares and, for large motion, its cubes are band-passed like the pulse and
+  regressed out of it. References that only show tracking jitter are left out, so a still head
+  is unaffected.
 * **HRV** is only reported when the pulse SNR is at least 5 dB. Tests show that below that,
   beat-timing noise roughly doubles RMSSD, so the app says "needs a steadier signal" instead of
   showing a wrong number.
@@ -104,7 +112,13 @@ npm run e2e        # browser test with a synthetic front camera (after npm run b
 ```
 
 The camera needs a secure context (`https://` or `http://localhost`). `?delegate=cpu` forces
-MediaPipe's CPU path (used by the headless test, whose GPU is emulated).
+MediaPipe's CPU path (used by the headless test, whose GPU is emulated). `?debug` shows a
+diagnostics panel during the scan: frame rate, raw and smoothed heart rate, SNR, head-motion
+compensation and breathing.
+
+The intro screen shows the build (commit and date). The build also publishes `version.json`;
+when it names a newer build than the one running, the app reloads itself between scans, since
+phones keep tabs open and GitHub Pages lets browsers cache the page.
 
 ### Tests
 
@@ -112,7 +126,9 @@ MediaPipe's CPU path (used by the headless test, whose GPU is emulated).
   beat-to-beat variability, breathing, lighting flicker, noise and jittery frame timing. It checks
   heart rate at 55–125 bpm (within 2.5 bpm), a fast heart rate falling after exercise
   (150→136, 132→118, 112→104 bpm) with breathing and motion noise near half the rate, recovery
-  from a noisy start, that pure brightness flicker is not mistaken for a pulse, HRV against the true beat intervals, the HRV quality gate and the breathing rate.
+  from a noisy start, heavy breathing that rocks the head (125 bpm through 32 breaths/min, which
+  reads as 64 bpm without motion compensation), resting readings with a drifting hand-held
+  camera, that pure brightness flicker is not mistaken for a pulse, HRV against the true beat intervals, the HRV quality gate and the breathing rate.
 * `e2e/run.mjs` runs the built app in Chromium with `e2e/fake-front-camera.js`, a synthetic front
   camera filming a rendered head whose skin pulses at a known rate (default 78 bpm, `BPM=90` to
   change), with natural sway and breathing motion. It checks the no-face guidance, alignment,

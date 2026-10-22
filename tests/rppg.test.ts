@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { bandpass, dominantFrequency, fft, hrvFromBeats } from '../src/rppg/dsp';
 import { VitalsEstimator } from '../src/rppg/estimator';
+import type { Pose } from '../src/rppg/motion';
 
 function rng(seed: number): () => number {
   let a = seed >>> 0;
@@ -35,6 +36,13 @@ interface SimOptions {
    * changing light), so POS can't fully cancel them: [frequency Hz, relative amplitude].
    */
   disturbances?: [number, number][];
+  /**
+   * Heavy breathing that rocks the head (pitch amplitude, rad) and changes the shading of the
+   * skin with it, including a harmonic at twice the breathing rate. Needs `breathsPerMin`.
+   */
+  heave?: { pitch: number; shading: number };
+  /** Slow hand-held camera drift (face position, face heights) with a matching light gradient. */
+  drift?: number;
   seed?: number;
 }
 
@@ -58,7 +66,7 @@ function simulate(o: SimOptions) {
   const base = [182, 134, 112];
   const pbv = [0.33, 0.77, 0.53]; // relative pulsatile strength per channel (blood volume pulse)
   const a = o.pulseAmplitude ?? 0.008;
-  const samples: { t: number; rgb: [number, number, number]; motionY: number }[] = [];
+  const samples: { t: number; rgb: [number, number, number]; motionY: number; pose: Pose }[] = [];
   let ft = 0;
   while (ft < o.seconds) {
     const p = pulseAt(ft);
@@ -66,10 +74,22 @@ function simulate(o: SimOptions) {
     const light = 1 + (o.flicker ?? 0) * Math.sin(2 * Math.PI * 0.7 * ft) + 0.002 * breath + 0.003 * (r() - 0.5);
     let dist = 0;
     for (const [f, amp] of o.disturbances ?? []) dist += amp * Math.sin(2 * Math.PI * f * ft + f);
+    const rock = o.heave ? Math.sin((2 * Math.PI * (o.breathsPerMin ?? 0) * ft) / 60 + 0.4) : 0;
+    const pitch = (o.heave?.pitch ?? 0) * rock;
+    // Shading follows how the face is tilted towards the light, both ways: fundamental + harmonic.
+    let heave = 0;
+    if (o.heave) heave = o.heave.shading * (0.5 * rock + rock * rock);
+    const dx = (o.drift ?? 0) * (Math.sin(0.23 * ft) + 0.6 * Math.sin(0.41 * ft + 1));
+    dist += 0.5 * dx;
     const tint = [1.0, 0.45, 0.2]; // not proportional to the skin tone
     // The region mean averages thousands of pixels: small noise, no integer quantisation.
-    const rgb = base.map((v, c) => v * light * (1 + dist * tint[c]) * (1 - a * pbv[c] * p) + (r() - 0.5) * (o.noise ?? 0.5)) as [number, number, number];
-    samples.push({ t: ft, rgb, motionY: 0.002 * breath + 0.0005 * (r() - 0.5) });
+    // Rocking also changes how much light reaches the skin under the surface (and the blood
+    // seen through it), which looks like a blood volume change: POS can't remove it.
+    const heaveTint = [0.4, 0.75, 0.5];
+    const rgb = base.map((v, c) => v * light * (1 + dist * tint[c] + heave * heaveTint[c]) * (1 - a * pbv[c] * p) + (r() - 0.5) * (o.noise ?? 0.5)) as [number, number, number];
+    const jit = () => (r() - 0.5) * 0.004; // landmark jitter
+    const pose: Pose = [dx + jit(), 0.4 * pitch + 0.002 * breath + jit(), 0.7 + jit(), jit() * 2, pitch + jit() * 2, jit() * 2];
+    samples.push({ t: ft, rgb, motionY: 0.002 * breath + 0.4 * pitch + 0.0005 * (r() - 0.5), pose });
     ft += 1 / 30 + (r() - 0.5) * 0.012; // jittery frame timing
   }
   return { samples, beats };
@@ -177,6 +197,48 @@ describe('VitalsEstimator', () => {
         v = est.estimate(15);
       }
       expect(Math.abs(v!.heartRate! - bpm)).toBeLessThan(3);
+    });
+  }
+
+  // Heavy breathing rocks the head, and the light on the skin changes with it at the breathing
+  // rate and twice it. Without the head pose, 32 breaths/min reads as a 64 bpm "pulse".
+  for (const [bpm, brpm, shading] of [
+    [125, 32, 0.016],
+    [105, 26, 0.012],
+  ]) {
+    it(`measures ${bpm} bpm through heavy breathing at ${brpm}/min, using head pose`, () => {
+      const run = (withPose: boolean) => {
+        const { samples } = simulate({ bpm, seconds: 30, breathsPerMin: brpm, heave: { pitch: 0.05, shading }, flicker: 0.005, seed: brpm });
+        const est = new VitalsEstimator();
+        let v = null;
+        for (const s of samples) {
+          est.push(withPose ? s : { ...s, pose: undefined });
+          if (Math.round(s.t * 30) % 8 === 0) v = est.estimate();
+        }
+        return v!;
+      };
+      const without = run(false);
+      expect(Math.abs(without.heartRate! - 2 * brpm)).toBeLessThan(4); // the artefact wins
+      const v = run(true);
+      expect(Math.abs(v.heartRate! - bpm)).toBeLessThan(3);
+      expect(v.motion!.active).toBe(true);
+      expect(Math.abs(v.motion!.freq! * 60 - brpm)).toBeLessThan(2);
+    });
+  }
+
+  for (const [name, o, bpm] of [
+    ['a hand-held camera drifting', { bpm: 60, breathsPerMin: 14, drift: 0.05 }, 60],
+    ['breathing at 24/min with slight head motion', { bpm: 72, breathsPerMin: 24, heave: { pitch: 0.02, shading: 0.002 } }, 72],
+  ] as const) {
+    it(`motion compensation keeps resting readings right: ${name}`, () => {
+      const { samples } = simulate({ ...o, seconds: 30, flicker: 0.005, seed: 2 });
+      const est = new VitalsEstimator();
+      let v = null;
+      for (const s of samples) {
+        est.push(s);
+        if (Math.round(s.t * 30) % 8 === 0) v = est.estimate();
+      }
+      expect(Math.abs(v!.heartRate! - bpm)).toBeLessThan(2.5);
     });
   }
 

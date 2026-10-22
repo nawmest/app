@@ -210,6 +210,7 @@ function render(ts: number): void {
   }
   updateCards(v, dt);
   updateHud(s, now);
+  updateDebug(s, now);
   wave.render(phase === 'scanning' ? v : null, now, dt);
   perf.renderMs += (performance.now() - ts - perf.renderMs) * 0.1;
 }
@@ -288,6 +289,55 @@ function finish(): void {
   });
 }
 
+/* ------------------------------------------------------------------ version, diagnostics */
+
+$('build').textContent = `Version ${__BUILD__}`;
+
+/**
+ * GitHub Pages lets browsers reuse a cached page for a while, and phones keep tabs open for days.
+ * When a newer version is deployed, load it (only between scans, and once per version).
+ */
+async function checkForUpdate(): Promise<void> {
+  if (running) return;
+  try {
+    const res = await fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' });
+    if (!res.ok) return;
+    const { build } = (await res.json()) as { build?: string };
+    if (!build || build === __BUILD__ || running) return;
+    const key = 'pulselens-update';
+    if (sessionStorage.getItem(key) === build) return;
+    sessionStorage.setItem(key, build);
+    const url = new URL(location.href);
+    url.searchParams.set('v', build.split(' ')[0]);
+    location.replace(url);
+  } catch {
+    // Offline, dev server or storage blocked: keep the current version.
+  }
+}
+void checkForUpdate();
+
+/** `?debug` shows what the pulse analysis sees, for troubleshooting a reading. */
+const debugEl = new URLSearchParams(location.search).has('debug') ? document.createElement('pre') : null;
+if (debugEl) {
+  debugEl.className = 'debug';
+  screens.scan.append(debugEl);
+}
+let debugAt = 0;
+function updateDebug(s: FrameState | null, now: number): void {
+  if (!debugEl || now - debugAt < 0.25) return;
+  debugAt = now;
+  const v = s?.vitals;
+  const f = (x: number | null | undefined, d = 0) => (x === null || x === undefined ? '–' : x.toFixed(d));
+  debugEl.textContent = [
+    `${__BUILD__}`,
+    `fps ${f(s?.fps, 1)}  tier ${perf.tier}  proc ${f(perf.processMs, 1)} ms`,
+    `hr ${f(v?.heartRate)}  raw ${f(v?.rawHeartRate)}  snr ${f(v?.snrDb, 1)} dB`,
+    `motion ${v?.motion ? (v.motion.active ? 'yes' : 'no') : '–'}  ${f(v?.motion?.freq && v.motion.freq * 60)}/min  removed ${f(v?.motion && v.motion.removed * 100)}%`,
+    `breath ${f(v?.respiration)}/min  q ${f(v && v.respirationConfidence, 2)}`,
+    `${s?.phase ?? ''} ${s?.guidance ?? ''}`,
+  ].join('\n');
+}
+
 /* ------------------------------------------------------------------ wiring */
 
 $('btn-start').addEventListener('click', startScan);
@@ -301,6 +351,7 @@ document.addEventListener('visibilitychange', () => {
     stopScan();
     showError('The scan stopped because the app went to the background. Start again when ready.');
   }
+  if (!document.hidden) void checkForUpdate();
 });
 window.addEventListener('resize', () => wave.resize());
 
