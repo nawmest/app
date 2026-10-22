@@ -162,12 +162,24 @@ export function dominantFrequency(x: ArrayLike<number>, fs: number, lo: number, 
   for (let i = i0; i <= i1; i++) if (best < 0 || power[i] > power[best]) best = i;
   if (best < 0) return null;
   if (harmonic) {
-    // Pulse waves can carry more power in their second harmonic than in the fundamental.
-    // A strong peak at half the frequency means that half is the real rate.
-    const half = Math.round(best / 2);
+    // A spiky pulse wave can carry more power in its 2nd harmonic than in its fundamental, so the
+    // peak may sit at twice the heart rate. Only move down to half when the spectrum shows the
+    // whole harmonic series: a real peak at half the frequency AND energy at 1.5x (the 3rd
+    // harmonic). Low-frequency noise near half the rate alone (fast breathing, movement after
+    // exercise) must not halve a genuinely high heart rate.
+    const near = (center: number) => {
+      let m = 0;
+      for (let i = Math.max(1, Math.round(center) - 2); i <= Math.min(power.length - 2, Math.round(center) + 2); i++) m = Math.max(m, power[i]);
+      return m;
+    };
+    const half = best / 2;
     let sub = -1;
-    for (let i = Math.max(i0, half - 2); i <= Math.min(i1, half + 2); i++) if (sub < 0 || power[i] > power[sub]) sub = i;
-    if (sub >= 0 && power[sub] > 0.3 * power[best] && power[sub] >= power[sub - 1] && power[sub] >= power[sub + 1]) best = sub;
+    for (let i = Math.max(i0, Math.round(half) - 2); i <= Math.min(i1, Math.round(half) + 2); i++) if (sub < 0 || power[i] > power[sub]) sub = i;
+    const isPeak = sub > 0 && power[sub] >= power[sub - 1] && power[sub] >= power[sub + 1];
+    // The 3rd harmonic only counts as evidence inside the analysed band: above it (e.g. at low
+    // frame rates) the spectrum holds filter leakage and aliases, not the pulse.
+    const third = 1.5 * best;
+    if (isPeak && third + 2 <= i1 && power[sub] > 0.35 * power[best] && near(third) > 0.25 * power[best]) best = sub;
   }
   const a = power[best - 1], b = power[best], c = power[best + 1];
   const den = a - 2 * b + c;

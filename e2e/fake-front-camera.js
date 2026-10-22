@@ -37,6 +37,7 @@
   const draw = () => {
     const t = (performance.now() - t0) / 1000;
     state.t = t;
+    state.draws = (state.draws || 0) + 1;
     const p = pulseAt(t);
     // More blood absorbs more light, most of all in green (blood volume pulse signature).
     const a = cfg.amplitude * p;

@@ -52,7 +52,7 @@ await page.waitForTimeout(3000);
 await page.screenshot({ path: join(out, '3-scanning.png') });
 check(await page.evaluate(() => document.querySelector('#card-hr').classList.contains('show')), 'metric cards float beside the face');
 await waitFor(() => (window.__pulse.state?.progress ?? 0) > 0.75, null, 90000);
-console.log(`      analysed frame rate: ${(await state()).fps.toFixed(1)} fps`);
+console.log(`      analysed frame rate: ${(await state()).fps.toFixed(1)} fps; camera drew ${await page.evaluate(() => (window.__fakeCam.state.draws / window.__fakeCam.state.t).toFixed(1))} fps`);
 await page.screenshot({ path: join(out, '4-scanning-late.png') });
 
 check(await waitFor(() => window.__pulse.state?.phase === 'done', null, 90000), 'scan completes');

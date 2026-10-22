@@ -42,10 +42,12 @@ front camera ─► MediaPipe Face Landmarker (478-point face mesh, on-device)
   a plane orthogonal to the skin tone, which cancels most brightness and specular changes from
   motion and lighting. In benchmarks, POS and CHROM are among the most robust classic methods.
 * **Heart rate** (`src/rppg/estimator.ts`, `dsp.ts`): zero-phase Butterworth band-pass, Hann-
-  windowed FFT over a 10 s window, and a parabolic peak. A sub-harmonic check stops the strong
-  second harmonic of a pulse wave being read as double the rate. The signal-to-noise ratio
-  (de Haan's definition) becomes a confidence score, and each new estimate is smoothed in
-  proportion to its quality.
+  windowed FFT over a 10 s window, and a parabolic peak. A spiky pulse wave can have a second
+  harmonic stronger than its fundamental; the estimate only moves down to half the peak frequency
+  when the spectrum also shows the third harmonic, so a fast post-exercise pulse is not halved
+  by noise near half its rate. The signal-to-noise ratio (de Haan's definition) becomes a
+  confidence score, and each new estimate is smoothed in proportion to its quality. When five
+  consecutive estimates agree on a clearly different rate, the reading re-locks to it at once.
 * **HRV** is only reported when the pulse SNR is at least 5 dB. Tests show that below that,
   beat-timing noise roughly doubles RMSSD, so the app says "needs a steadier signal" instead of
   showing a wrong number.
@@ -108,13 +110,19 @@ MediaPipe's CPU path (used by the headless test, whose GPU is emulated).
 
 * `tests/rppg.test.ts` simulates the mean skin colour of a face: a realistic pulse wave with
   beat-to-beat variability, breathing, lighting flicker, noise and jittery frame timing. It checks
-  heart rate at 55–125 bpm (within 2.5 bpm), that pure brightness flicker is not mistaken for a
-  pulse, HRV against the true beat intervals, the HRV quality gate and the breathing rate.
+  heart rate at 55–125 bpm (within 2.5 bpm), a fast heart rate falling after exercise
+  (150→136, 132→118, 112→104 bpm) with breathing and motion noise near half the rate, recovery
+  from a noisy start, that pure brightness flicker is not mistaken for a pulse, HRV against the true beat intervals, the HRV quality gate and the breathing rate.
 * `e2e/run.mjs` runs the built app in Chromium with `e2e/fake-front-camera.js`, a synthetic front
   camera filming a rendered head whose skin pulses at a known rate (default 78 bpm, `BPM=90` to
   change), with natural sway and breathing motion. It checks the no-face guidance, alignment,
   live readings, the final heart rate (±5 bpm) and the results screen. In this environment the
-  result was 77–78 bpm and breathing 15.0/min against 15 simulated.
+  result was 77–80 bpm and breathing 15.0/min against 15 simulated.
+
+  This headless browser only manages about 7 camera frames per second. That is enough for resting
+  rates but not for fast ones: in simulation, heart rates up to ~125 bpm need at least ~10 fps,
+  150 bpm about 12 fps and 175 bpm about 20 fps (phones usually run at 20–30 fps). Fast,
+  post-exercise rates are therefore covered by the unit tests rather than this test.
 
 ### Deploying
 

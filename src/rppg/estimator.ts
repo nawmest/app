@@ -47,6 +47,8 @@ export class VitalsEstimator {
   private samples: FrameSample[] = [];
   private smoothedHr: number | null = null;
   private lastHrT = 0;
+  /** Recent raw (unsmoothed) estimates, to notice when the smoothed value is stuck on a wrong one. */
+  private recentRaw: number[] = [];
 
   constructor(
     /** Heart-rate analysis window (s). */
@@ -58,6 +60,7 @@ export class VitalsEstimator {
   reset(): void {
     this.samples = [];
     this.smoothedHr = null;
+    this.recentRaw = [];
   }
 
   get duration(): number {
@@ -111,10 +114,21 @@ export class VitalsEstimator {
       const raw = peak.freq * 60;
       const dt = Math.max(0.05, tEnd - this.lastHrT);
       this.lastHrT = tEnd;
+      // Only clear readings take part in re-locking, so it can't snap onto a run of noise.
+      if (confidence >= 0.6) this.recentRaw.push(raw);
+      else this.recentRaw = [];
+      if (this.recentRaw.length > 6) this.recentRaw.shift();
+      const recent = this.recentRaw.slice(-5).sort((a, b) => a - b);
+      const median = recent[recent.length >> 1];
+      const agree = recent.length === 5 && recent[4] - recent[0] < 8;
       if (this.smoothedHr === null) this.smoothedHr = raw;
-      else {
+      else if (agree && Math.abs(median - this.smoothedHr) > 12) {
+        // Five consecutive estimates agree on a clearly different rate: the earlier lock was
+        // wrong (e.g. noise during the first seconds) or the rate really moved. Re-lock.
+        this.smoothedHr = median;
+      } else {
         const jump = Math.abs(raw - this.smoothedHr);
-        // Large jumps need strong evidence (and are more likely a harmonic or noise).
+        // Isolated large jumps need strong evidence (and are more likely noise).
         const trust = confidence * (jump > 15 ? 0.25 : 1);
         const k = 1 - Math.exp(-dt * 2 * trust);
         this.smoothedHr += (raw - this.smoothedHr) * k;
