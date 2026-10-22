@@ -1,12 +1,12 @@
 {
-  "name": "TriPoint AR",
-  "short_name": "TriPoint AR",
-  "description": "Pin 3 points on the live camera image to create a virtual QR code anchor for AR animations.",
+  "name": "PulseLens",
+  "short_name": "PulseLens",
+  "description": "Contactless heart rate, breathing rate and HRV from your phone's front camera.",
   "start_url": "./",
   "scope": "./",
-  "display": "fullscreen",
-  "orientation": "any",
-  "background_color": "#05070d",
-  "theme_color": "#05070d",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#05080f",
+  "theme_color": "#05080f",
   "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
 }

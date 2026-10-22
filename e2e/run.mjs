@@ -1,145 +1,69 @@
-// End-to-end test: serves the production build, opens it in Chromium with a synthetic camera
-// (e2e/fake-camera.js), pins three points by tapping, moves the "camera" and checks that the
-// tracked virtual QR code stays on the pinned spots. Also checks lost/relocalize behaviour.
+// End-to-end test: serves the production build and opens it in Chromium with a synthetic front
+// camera (e2e/fake-front-camera.js) filming a rendered head whose skin pulses at a known rate.
+// Checks guidance, the scan flow, live vitals and the final heart rate against ground truth.
 //
-//   npm run build && npm run e2e
-import { mkdir } from 'node:fs/promises';
+//   npm run build && npm run e2e            (BPM=90 npm run e2e to change the simulated rate)
+import { mkdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { chromium } from 'playwright';
 import { serve } from './serve.mjs';
 
+const BPM = Number(process.env.BPM ?? 78);
 const out = resolve('test-output');
 await mkdir(out, { recursive: true });
 const server = await serve();
-const url = server.url;
-
-const browser = await chromium.launch({
-  executablePath: process.env.CHROMIUM_PATH || undefined,
-  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'],
-});
-const page = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true });
+const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+// 1x pixel density keeps this slow, software-rendered browser above the app's minimum frame rate.
+const page = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
-page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
-await page.addInitScript({ path: resolve('e2e/fake-camera.js') });
-await page.goto(url);
+const head = await readFile(resolve('e2e/fixtures/head.png'));
+await page.route('**/e2e/fixtures/head.png', (r) => r.fulfill({ contentType: 'image/png', body: head }));
+await page.addInitScript((bpm) => (window.__fakeCamConfig = { bpm }), BPM);
+await page.addInitScript({ path: resolve('e2e/fake-front-camera.js') });
+// The software GPU in headless Chromium is very slow; use MediaPipe's CPU path here.
+await page.goto(`${server.url}?delegate=cpu`);
 
 let failures = 0;
 const check = (cond, msg) => {
   console.log(`${cond ? 'PASS' : 'FAIL'}  ${msg}`);
   if (!cond) failures++;
 };
-const app = (expr) => page.evaluate(expr);
-const sleep = (ms) => page.waitForTimeout(ms);
+const state = () => page.evaluate(() => window.__pulse.state);
+const waitFor = (fn, arg, timeout) => page.waitForFunction(fn, arg, { timeout, polling: 250 }).then(() => true, () => false);
 
 await page.screenshot({ path: join(out, '0-intro.png') });
+
+// Nobody in front of the camera: the app asks for a face and doesn't start measuring.
+await page.evaluate(() => (window.__fakeCam.state.present = false));
 await page.click('#btn-start');
-await page.waitForFunction(() => window.__tripoint.mode === 'pinning' && window.__tripoint.frames > 10);
-check(true, 'camera started and frames are processed');
+check(await waitFor(() => window.__pulse.state?.guidance === 'no-face', null, 60000), 'asks for a face when nobody is in view');
+await page.waitForTimeout(800);
+check((await state()).phase !== 'scanning', 'does not measure without a face');
+await page.screenshot({ path: join(out, '1-no-face.png') });
 
-// Freeze the scene while pinning so ground truth is exact.
-await app(() => (window.__fakeCam.state.frozen = true));
-await sleep(300);
+// Face appears: alignment, then the scan.
+await page.evaluate(() => (window.__fakeCam.state.present = true));
+check(await waitFor(() => window.__pulse.state?.phase === 'scanning', null, 30000), 'starts scanning once the face is aligned');
+await page.waitForTimeout(1500);
+await page.screenshot({ path: join(out, '2-scan-start.png') });
+check(await waitFor(() => (window.__pulse.state?.hr ?? 0) > 0, null, 40000), 'shows a live heart rate');
+await page.waitForTimeout(3000);
+await page.screenshot({ path: join(out, '3-scanning.png') });
+check(await page.evaluate(() => document.querySelector('#card-hr').classList.contains('show')), 'metric cards float beside the face');
+await waitFor(() => (window.__pulse.state?.progress ?? 0) > 0.75, null, 90000);
+console.log(`      analysed frame rate: ${(await state()).fps.toFixed(1)} fps`);
+await page.screenshot({ path: join(out, '4-scanning-late.png') });
 
-const texPoints = [[250, 250], [550, 250], [250, 550]];
-for (const [u, v] of texPoints) {
-  const pos = await page.evaluate(([u, v]) => {
-    const [x, y] = window.__fakeCam.project(u, v);
-    const view = window.__tripoint.view;
-    return [view.left + (x / window.__fakeCam.width) * view.width, view.top + (y / window.__fakeCam.height) * view.height];
-  }, [u, v]);
-  await page.mouse.click(pos[0], pos[1]);
-  await sleep(250);
-  if (texPoints.indexOf(texPoints.find((p) => p[0] === u && p[1] === v)) === 1) {
-    await page.screenshot({ path: join(out, '1-pinning.png') });
-  }
-}
-await page.waitForFunction(() => window.__tripoint.mode === 'tracking');
-check(true, 'three pins placed, tracking started');
-
-// Where the (snapped) pins really are on the poster.
-const pinTex = await page.evaluate(() => {
-  const [pw] = window.__tripoint.processingSize;
-  const s = window.__fakeCam.width / pw;
-  const p = window.__tripoint.pins;
-  return [0, 1, 2].map((k) => window.__fakeCam.unproject(p[2 * k] * s, p[2 * k + 1] * s));
-});
-
-async function measure(label) {
-  await app(() => (window.__fakeCam.state.frozen = true));
-  await sleep(900); // let the smoothing filter settle
-  const r = await page.evaluate((pinTex) => {
-    const t = window.__tripoint;
-    const [pw] = t.processingSize;
-    const s = pw / window.__fakeCam.width;
-    if (!t.quad) return { state: t.trackerState, err: Infinity };
-    const corners = [0, 1, 3].map((i) => [t.quad[2 * i], t.quad[2 * i + 1]]);
-    let err = 0;
-    pinTex.forEach(([u, v], k) => {
-      const [x, y] = window.__fakeCam.project(u, v);
-      err = Math.max(err, Math.hypot(corners[k][0] - x * s, corners[k][1] - y * s));
-    });
-    return { state: t.trackerState, err };
-  }, pinTex);
-  check(r.state === 'tracking' && r.err < 3, `${label}: state=${r.state}, max pin error=${r.err.toFixed(2)} px (processing res)`);
-  return r;
-}
-
-await measure('right after lock');
-await page.screenshot({ path: join(out, '2-locked.png') });
-
-await page.waitForFunction(() => window.__tripoint.companion, null, { timeout: 15000 }).catch(() => {});
-check(!!(await app(() => window.__tripoint.companion)), 'companion appears on the virtual code');
-for (let i = 0; i < 5; i++) {
-  // Move the camera in small steps per processed frame, independent of the browser's speed.
-  for (let k = 0; k < 30; k++) {
-    const f0 = await app(() => window.__tripoint.frames);
-    await app(() => (window.__fakeCam.state.t += 0.05));
-    await page.waitForFunction((f) => window.__tripoint.frames > f, f0);
-  }
-  await page.screenshot({ path: join(out, `3-${i}-move.png`) });
-  await measure(`after camera move ${i + 1}`);
-}
-
-// Tap next to the code: the companion walks there.
-{
-  const before = await app(() => window.__tripoint.companion.pos);
-  const q = await page.evaluate(() => {
-    const t = window.__tripoint;
-    const v = t.view;
-    const [pw, ph] = t.processingSize;
-    // Point 1.2 sides to the right of the code centre, via the tracked marker quad.
-    const qd = t.quad;
-    const cx = (qd[0] + qd[2] + qd[4] + qd[6]) / 4;
-    const cy = (qd[1] + qd[3] + qd[5] + qd[7]) / 4;
-    const rx = (qd[2] - qd[0]) * 1.2;
-    const ry = (qd[3] - qd[1]) * 1.2;
-    return [v.left + ((cx + rx) / pw) * v.width, v.top + ((cy + ry) / ph) * v.height];
-  });
-  await app(() => (window.__fakeCam.state.frozen = true));
-  await page.mouse.click(q[0], q[1]);
-  await page.waitForFunction(() => window.__tripoint.companion && !window.__tripoint.companion.goal, null, { timeout: 20000 }).catch(() => {});
-  const after = await app(() => window.__tripoint.companion);
-  const moved = Math.hypot(after.pos[0] - before[0], after.pos[2] - before[2]);
-  check(moved > 0.6 && !after.goal, `tapping beside the code calls the companion over (moved ${moved.toFixed(2)} sides, now ${after.anim})`);
-  await page.screenshot({ path: join(out, '3-companion-called.png') });
-}
-
-// Look away (a different, static scene), then come back to about where the target was lost.
-await app(() => {
-  window.__fakeCam.state.frozen = true;
-  window.__fakeCam.state.away = true;
-});
-await page.waitForFunction(() => window.__tripoint.trackerState === 'lost', null, { timeout: 5000 }).catch(() => {});
-check((await app(() => window.__tripoint.trackerState)) === 'lost', 'target reported lost when the camera looks away');
-await page.screenshot({ path: join(out, '4-lost.png') });
-await app(() => {
-  window.__fakeCam.state.frozen = true;
-  window.__fakeCam.state.away = false;
-});
-await page.waitForFunction(() => window.__tripoint.trackerState === 'tracking', null, { timeout: 5000 }).catch(() => {});
-await measure('after relocalization');
-await page.screenshot({ path: join(out, '5-relocalized.png') });
+check(await waitFor(() => window.__pulse.state?.phase === 'done', null, 90000), 'scan completes');
+const r = (await state()).result;
+check(!!r && Math.abs(r.heartRate - BPM) <= 5, `final heart rate ${r ? r.heartRate.toFixed(1) : 'n/a'} bpm vs ${BPM} bpm simulated (±5)`);
+check(!!r && r.quality > 0.3, `signal quality ${r ? Math.round(r.quality * 100) : 0}%`);
+await page.waitForTimeout(600);
+const shown = await page.textContent('#results .big .num');
+check(!(await page.isHidden('#results')) && shown === String(Math.round(r.heartRate)), `results screen shows ${shown} bpm`);
+await page.screenshot({ path: join(out, '5-results.png'), fullPage: true });
+console.log(`      breathing: ${r?.respiration ? r.respiration.toFixed(1) + '/min (simulated 15)' : 'not reported'}; HRV: ${r?.hrv ? r.hrv.rmssd.toFixed(0) + ' ms' : 'withheld'}`);
 
 check(errors.length === 0, `no page errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
 await browser.close();

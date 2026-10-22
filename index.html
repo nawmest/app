@@ -3,64 +3,103 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
-    <meta name="theme-color" content="#05070d" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="theme-color" content="#05080f" />
+    <meta name="description" content="Contactless heart rate, breathing rate and HRV from your phone's front camera." />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
-    <title>TriPoint AR</title>
+    <title>PulseLens</title>
   </head>
   <body>
-    <div id="stage">
-      <video id="video" muted playsinline autoplay></video>
-      <canvas id="gl"></canvas>
-      <canvas id="overlay"></canvas>
-    </div>
-
-    <div id="ui">
-    <header id="hud" hidden>
-      <div id="status"><span class="dot"></span><span id="status-text">Starting…</span></div>
-      <p id="hint"></p>
-    </header>
-
-    <footer id="controls" hidden>
-      <div class="actions">
-        <button id="btn-undo" class="action" type="button">↶ Undo</button>
-        <button id="btn-reset" class="action" type="button">⟲ Reset</button>
-        <button id="btn-base" class="action toggle on" type="button" aria-pressed="true">▦ QR base</button>
-        <button id="btn-debug" class="action toggle" type="button" aria-pressed="false">⋯ Debug</button>
+    <!-- Landing -->
+    <section id="intro" class="screen intro">
+      <div class="intro-art" aria-hidden="true">
+        <svg viewBox="0 0 200 200" class="face-art">
+          <defs>
+            <linearGradient id="g-art" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#4cf2d2" />
+              <stop offset="1" stop-color="#5eb6ff" />
+            </linearGradient>
+          </defs>
+          <circle cx="100" cy="100" r="92" class="ring r1" />
+          <circle cx="100" cy="100" r="76" class="ring r2" />
+          <path class="face-line" d="M100 34c-27 0-44 21-44 50 0 17 5 33 13 45 8 12 19 22 31 22s23-10 31-22c8-12 13-28 13-45 0-29-17-50-44-50z" />
+          <path class="face-line thin" d="M76 92c6-4 12-4 18 0M106 92c6-4 12-4 18 0M100 98v20l-6 4M88 136c8 5 16 5 24 0" />
+          <rect class="scanbar" x="52" y="30" width="96" height="3" rx="1.5" />
+        </svg>
+        <div class="beat-badge"><span class="heart-ico"></span><span>72</span><small>BPM</small></div>
       </div>
-    </footer>
-
-    <div id="toast" role="status" aria-live="polite"></div>
-    </div>
-
-    <section id="intro">
-      <div class="card">
-        <div class="logo" aria-hidden="true">
-          <span></span><span></span><span></span>
-        </div>
-        <h1>TriPoint AR</h1>
-        <p>
-          Point your camera at a flat surface and <strong>tap 3 corners of a square</strong> on it, like
-          the corner markers of a QR code. Your <strong>companion</strong> appears there, explores the
-          surfaces around you and comes to wherever you tap.
+      <div class="intro-copy">
+        <p class="eyebrow">Contactless vitals</p>
+        <h1>PulseLens</h1>
+        <p class="lead">
+          A 30-second face scan with your front camera. PulseLens reads the tiny colour changes your
+          heartbeat makes in your skin and turns them into vital signs.
         </p>
-        <ol>
-          <li><b>1</b> top-left corner</li>
-          <li><b>2</b> top-right corner</li>
-          <li><b>3</b> bottom-left corner</li>
-        </ol>
-        <button id="btn-xr" class="primary" type="button" hidden>Start AR</button>
-        <button id="btn-start" class="primary" type="button">Start camera</button>
-        <div class="alt-sources">
-          <button id="btn-video" class="secondary" type="button">Record or pick a video</button>
-          <button id="btn-sim" class="secondary" type="button">Try the simulator</button>
-        </div>
-        <input id="file-video" type="file" accept="video/*" capture="environment" hidden />
-        <p id="intro-error" class="error" hidden></p>
+        <ul class="features">
+          <li><span class="dot hr"></span><b>Heart rate</b><span>beats per minute</span></li>
+          <li><span class="dot resp"></span><b>Breathing rate</b><span>breaths per minute</span></li>
+          <li><span class="dot hrv"></span><b>Heart rate variability</b><span>RMSSD, when the signal allows</span></li>
+        </ul>
+        <button id="btn-start" class="btn primary" type="button">Start face scan</button>
+        <p id="intro-error" class="error" role="alert" hidden></p>
+        <p class="fineprint">
+          <span class="lock" aria-hidden="true"></span>Video is analysed on this device and never leaves it.
+          For wellness only, not a medical device.
+        </p>
       </div>
+    </section>
+
+    <!-- Model loading -->
+    <section id="loading" class="screen center" hidden>
+      <div class="loader" aria-hidden="true"><span></span><span></span><span></span></div>
+      <p id="loading-text">Preparing the face model…</p>
+    </section>
+
+    <!-- Live scan -->
+    <section id="scan" class="screen scan" hidden>
+      <video id="video" muted playsinline autoplay></video>
+      <canvas id="fx"></canvas>
+
+      <div id="cards" aria-live="polite">
+        <article class="metric hr" id="card-hr">
+          <header><span class="ico heart-ico"></span>Heart rate</header>
+          <div class="value"><span class="num" id="hr-value">—</span><span class="unit">bpm</span></div>
+          <p class="sub" id="hr-sub">Finding pulse…</p>
+        </article>
+        <article class="metric resp" id="card-resp">
+          <header><span class="ico lungs-ico"></span>Breathing</header>
+          <div class="value"><span class="num" id="resp-value">—</span><span class="unit">/min</span></div>
+          <p class="sub" id="resp-sub">Needs ~15 s</p>
+        </article>
+        <article class="metric hrv" id="card-hrv">
+          <header><span class="ico wave-ico"></span>HRV</header>
+          <div class="value"><span class="num" id="hrv-value">—</span><span class="unit">ms</span></div>
+          <p class="sub" id="hrv-sub">Hold very still</p>
+        </article>
+      </div>
+
+      <header class="topbar">
+        <button id="btn-close" class="icon-btn" type="button" aria-label="Stop scan"><span class="x-ico"></span></button>
+        <div class="brand"><span class="logo-dot"></span>PulseLens</div>
+        <div class="quality" id="quality" title="Signal quality">
+          <span class="bars"><i></i><i></i><i></i><i></i></span><span id="quality-text">Signal</span>
+        </div>
+      </header>
+
+      <div class="guidance" id="guidance" role="status"></div>
+
+      <footer class="dock">
+        <div class="dock-row">
+          <div class="phase" id="phase-text">Align your face</div>
+          <div class="timer" id="timer"></div>
+        </div>
+        <canvas id="wave" aria-label="Live pulse waveform"></canvas>
+      </footer>
+    </section>
+
+    <!-- Results -->
+    <section id="results" class="screen results" hidden>
+      <div class="results-inner" id="results-body"></div>
     </section>
 
     <script type="module" src="/src/main.ts"></script>

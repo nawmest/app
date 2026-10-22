@@ -9,6 +9,9 @@ const types = {
   '.css': 'text/css',
   '.svg': 'image/svg+xml',
   '.webmanifest': 'application/manifest+json',
+  '.wasm': 'application/wasm',
+  '.png': 'image/png',
+  '.woff2': 'font/woff2',
 };
 
 export async function serve(dir = 'dist') {

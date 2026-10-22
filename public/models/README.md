@@ -1,5 +1,6 @@
-# RobotExpressive.glb
+# face_landmarker.task
 
-Model by [Tomás Laulhé (Quaternius)](https://www.patreon.com/quaternius), CC0 1.0.
-Modifications by [Don McCurdy](https://donmccurdy.com/). Taken from the three.js examples
-(`examples/models/gltf/RobotExpressive`, r170).
+MediaPipe Face Landmarker model (float16, version 1) from
+`https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task`,
+by Google, licensed under the Apache License 2.0. Self-hosted so the app works without third-party
+requests.

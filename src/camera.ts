@@ -1,9 +1,7 @@
-import { type GrayImage, createGray, rgbaToGray } from './vision/image';
-
 export class CameraError extends Error {}
 
-/** Opens the rear camera and starts playback in the given video element. */
-export async function startCamera(video: HTMLVideoElement): Promise<MediaStream> {
+/** Opens the front (selfie) camera in the given video element. */
+export async function startFrontCamera(video: HTMLVideoElement): Promise<MediaStream> {
   if (!window.isSecureContext) {
     throw new CameraError('Camera access needs a secure (https://) page. Open the app over HTTPS.');
   }
@@ -15,7 +13,7 @@ export async function startCamera(video: HTMLVideoElement): Promise<MediaStream>
     stream = await navigator.mediaDevices.getUserMedia({
       audio: false,
       video: {
-        facingMode: { ideal: 'environment' },
+        facingMode: 'user',
         width: { ideal: 1280 },
         height: { ideal: 720 },
         frameRate: { ideal: 30 },
@@ -24,7 +22,7 @@ export async function startCamera(video: HTMLVideoElement): Promise<MediaStream>
   } catch (e) {
     const name = (e as DOMException)?.name;
     if (name === 'NotAllowedError') throw new CameraError('Camera access was blocked. Allow camera access for this page in your browser settings.');
-    if (name === 'NotFoundError') throw new CameraError('No camera was found on this device.');
+    if (name === 'NotFoundError') throw new CameraError('No front camera was found on this device.');
     throw new CameraError(`Could not open the camera (${name ?? e}).`);
   }
   video.srcObject = stream;
@@ -39,33 +37,6 @@ export async function startCamera(video: HTMLVideoElement): Promise<MediaStream>
 }
 
 export function stopCamera(video: HTMLVideoElement): void {
-  const stream = video.srcObject as MediaStream | null;
-  stream?.getTracks().forEach((t) => t.stop());
+  (video.srcObject as MediaStream | null)?.getTracks().forEach((t) => t.stop());
   video.srcObject = null;
-}
-
-/** Downscales video frames to the processing resolution and converts them to grayscale. */
-export class FrameGrabber {
-  readonly width: number;
-  readonly height: number;
-  private readonly canvas: HTMLCanvasElement;
-  private readonly ctx: CanvasRenderingContext2D;
-  private readonly gray: GrayImage;
-
-  constructor(videoWidth: number, videoHeight: number, maxSide = 480) {
-    const s = Math.min(1, maxSide / Math.max(videoWidth, videoHeight));
-    this.width = Math.round(videoWidth * s);
-    this.height = Math.round(videoHeight * s);
-    this.canvas = document.createElement('canvas');
-    this.canvas.width = this.width;
-    this.canvas.height = this.height;
-    this.ctx = this.canvas.getContext('2d', { willReadFrequently: true })!;
-    this.gray = createGray(this.width, this.height);
-  }
-
-  grab(video: HTMLVideoElement): GrayImage {
-    this.ctx.drawImage(video, 0, 0, this.width, this.height);
-    const { data } = this.ctx.getImageData(0, 0, this.width, this.height);
-    return rgbaToGray(data, this.gray);
-  }
 }
