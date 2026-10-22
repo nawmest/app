@@ -27,6 +27,10 @@ camera pose relative to it, and renders 3D animations standing on the virtual co
    Point back at the spot and it is found again automatically. **Reset** starts over, **Undo**
    removes the last pin, **QR base** toggles the virtual code overlay, **Debug** shows tracked points.
 
+No camera available (desktop, embedded preview)? The start screen also offers **Record or pick a
+video**, which tracks a clip you film with your phone, and **Try the demo scene**, a synthetic camera
+filming a poster.
+
 Tips: pin points that are clearly distinguishable (corners of letters or shapes, not plain areas),
 spread them out, and keep the surface reasonably well lit.
 
@@ -103,7 +107,12 @@ works in a secure context: `https://` or `http://localhost`.
 `.github/workflows/deploy.yml` runs the type check, tests and build on every push, and on
 `main` publishes `dist/` to **GitHub Pages**. Enable it once under *Settings → Pages → Source:
 GitHub Actions*. The resulting `https://<user>.github.io/<repo>/` URL works directly on phones.
-Any static HTTPS host also works (the build uses relative paths).
+Pages deploys from the repository's default branch, and private repositories need a GitHub
+plan that includes Pages. Any static HTTPS host also works (the build uses relative paths).
+
+`npm run build:artifact` packs the build into a single HTML body (`dist-artifact/tripoint-ar.html`)
+for hosts that take one file, such as a claude.ai artifact. Live camera access is blocked in that
+sandbox, so use the video or demo sources there.
 
 ### End-to-end test
 

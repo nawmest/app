@@ -23,7 +23,7 @@ export async function startCamera(video: HTMLVideoElement): Promise<MediaStream>
     });
   } catch (e) {
     const name = (e as DOMException)?.name;
-    if (name === 'NotAllowedError') throw new CameraError('Camera permission was denied. Allow camera access and try again.');
+    if (name === 'NotAllowedError') throw new CameraError('Camera access was blocked. Allow camera access for this page in your browser settings.');
     if (name === 'NotFoundError') throw new CameraError('No camera was found on this device.');
     throw new CameraError(`Could not open the camera (${name ?? e}).`);
   }

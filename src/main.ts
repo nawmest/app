@@ -1,5 +1,6 @@
 import './style.css';
 import { CameraError, FrameGrabber, startCamera } from './camera';
+import { startDemo, startVideoFile } from './sources';
 import { ANIMATIONS } from './ar/animations';
 import { OneEuroFilter } from './ar/filter';
 import { type Intrinsics, estimateIntrinsics, poseFromHomography } from './ar/pose';
@@ -357,36 +358,51 @@ function loop(time: number): void {
 
 /* ------------------------------------------------------------------ Boot */
 
-async function start(): Promise<void> {
+type Source = { kind: 'camera' } | { kind: 'file'; file: File } | { kind: 'demo' };
+
+async function start(source: Source): Promise<void> {
   const btn = $<HTMLButtonElement>('btn-start');
   const err = $('intro-error');
-  btn.disabled = true;
-  btn.textContent = 'Starting camera…';
+  const buttons = document.querySelectorAll<HTMLButtonElement>('#intro button');
+  buttons.forEach((b) => (b.disabled = true));
+  if (source.kind === 'camera') btn.textContent = 'Starting camera…';
   err.hidden = true;
   try {
-    await startCamera(video);
+    if (source.kind === 'camera') await startCamera(video);
+    else if (source.kind === 'file') await startVideoFile(video, source.file);
+    else await startDemo(video);
   } catch (e) {
-    err.textContent = e instanceof CameraError ? e.message : String(e);
+    err.textContent = e instanceof CameraError || e instanceof Error ? e.message : String(e);
+    if (source.kind === 'camera') err.textContent += ' You can still record or pick a video, or try the demo scene.';
     err.hidden = false;
-    btn.disabled = false;
-    btn.textContent = 'Try again';
+    buttons.forEach((b) => (b.disabled = false));
+    btn.textContent = 'Start camera';
     return;
   }
   try {
     scene ??= new ARScene(glCanvas);
   } catch {
-    toast('WebGL is not available — animations are disabled.', true, 5000);
+    toast('WebGL is not available, so animations are turned off.', true, 5000);
   }
   $('intro').hidden = true;
   $('hud').hidden = false;
   $('controls').hidden = false;
   layout();
   resetPins();
+  if (source.kind === 'file') toast('The video loops. Pin 3 points while it plays.', false, 3500);
 }
 
 function init(): void {
   buildChips();
-  $('btn-start').addEventListener('click', start);
+  $('btn-start').addEventListener('click', () => start({ kind: 'camera' }));
+  $('btn-demo').addEventListener('click', () => start({ kind: 'demo' }));
+  const fileInput = $<HTMLInputElement>('file-video');
+  $('btn-video').addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files?.[0];
+    fileInput.value = '';
+    if (file) start({ kind: 'file', file });
+  });
   overlay.addEventListener('pointerdown', onTap);
   btnUndo.addEventListener('click', undoPin);
   btnReset.addEventListener('click', resetPins);

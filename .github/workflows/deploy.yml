@@ -2,7 +2,6 @@ name: Test & deploy
 
 on:
   push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -23,16 +22,18 @@ jobs:
       - run: npm test
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch
         with:
           path: dist
 
-  # Publishes the app to GitHub Pages (HTTPS, so the camera works on phones).
-  # Enable it once under Settings -> Pages -> Source: "GitHub Actions".
+  # Publishes the app from the default branch to GitHub Pages (HTTPS, so the camera works on
+  # phones). Enable it once under Settings -> Pages -> Source: "GitHub Actions", then re-run.
+  # Until then this job fails without failing the workflow.
   deploy:
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch
     needs: test
     runs-on: ubuntu-latest
+    continue-on-error: true
     permissions:
       pages: write
       id-token: write

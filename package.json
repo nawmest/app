@@ -10,7 +10,8 @@
     "preview": "vite preview --host",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "e2e": "node e2e/run.mjs"
+    "e2e": "node e2e/run.mjs",
+    "build:artifact": "npm run build && node scripts/build-artifact.mjs"
   },
   "dependencies": {
     "three": "^0.186.1"
