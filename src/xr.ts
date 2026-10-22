@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import type { ARScene } from './ar/scene';
 import { type QRFrame, qrFrameFromPoints } from './ar/qrFrame';
 import type { Vec3 } from './ar/linalg';
+import type { V2 } from './companion/geometry2d';
+import { CompanionWorld } from './companion/world';
 
 /**
  * WebXR mode (Android Chrome with ARCore and other WebXR AR browsers).
@@ -10,6 +12,10 @@ import type { Vec3 } from './ar/linalg';
  * hit-tested against the actual surface and the three pins become true 3D points. The virtual QR
  * code is built from them in world space and, when supported, held by an XRAnchor so it stays
  * put as the AR system refines its map.
+ *
+ * Once the code is placed, a companion appears on it. A fan of hit-test rays (and plane
+ * detection, where the browser offers it) keeps mapping the surfaces the camera sees, and taps
+ * call the companion to the tapped spot.
  */
 
 export async function xrSupported(): Promise<boolean> {
@@ -62,6 +68,14 @@ export class XRController {
   private readonly reticle: THREE.Mesh;
   private readonly tmp = new THREE.Matrix4();
   private sawSurface = false;
+  private world: CompanionWorld | null = null;
+  private worldGeneration = 0;
+  /** Hit-test rays fanned out across the view, used to map surfaces. */
+  private samplers: XRHitTestSource[] = [];
+  private readonly planeTimes = new Map<XRPlane, number>();
+  private debug = false;
+  private discovered = 1;
+  private readonly camPos = new THREE.Vector3();
 
   constructor(
     private readonly ar: ARScene,
@@ -83,7 +97,7 @@ export class XRController {
   async start(): Promise<void> {
     const session = await navigator.xr!.requestSession('immersive-ar', {
       requiredFeatures: ['hit-test'],
-      optionalFeatures: ['dom-overlay', 'anchors'],
+      optionalFeatures: ['dom-overlay', 'anchors', 'plane-detection'],
       domOverlay: { root: this.overlay },
     });
     this.session = session;
@@ -95,6 +109,18 @@ export class XRController {
 
     const viewer = await session.requestReferenceSpace('viewer');
     this.viewerSource = (await session.requestHitTestSource?.({ space: viewer })) ?? null;
+    this.samplers = [];
+    for (const x of [-0.35, 0, 0.35]) {
+      for (const y of [-0.5, -0.2, 0.15]) {
+        try {
+          const ray = new XRRay({ x: 0, y: 0, z: 0, w: 1 }, { x, y, z: -1, w: 0 });
+          const src = await session.requestHitTestSource?.({ space: viewer, offsetRay: ray });
+          if (src) this.samplers.push(src);
+        } catch {
+          // Fewer rays just means slower mapping.
+        }
+      }
+    }
     try {
       this.transientSource =
         (await session.requestHitTestSourceForTransientInput?.({ profile: 'generic-touchscreen' })) ?? null;
@@ -111,7 +137,20 @@ export class XRController {
     this.session?.end().catch(() => {});
   }
 
+  setDebug(on: boolean): void {
+    this.debug = on;
+    this.world?.setDebug(on);
+  }
+
+  private disposeWorld(): void {
+    this.worldGeneration++;
+    this.world?.dispose();
+    this.world = null;
+    this.discovered = 1;
+  }
+
   reset(): void {
+    this.disposeWorld();
     for (const p of this.pins) this.ar.scene.remove(p.mesh);
     this.pins = [];
     this.frame = null;
@@ -125,6 +164,7 @@ export class XRController {
 
   undo(): void {
     if (this.frame) {
+      this.disposeWorld();
       this.frame = null;
       this.anchorOffset = null;
       this.ar.setContentMatrix(null);
@@ -142,8 +182,9 @@ export class XRController {
 
   private updateUI(): void {
     if (this.frame) {
-      this.cb.status('tracking', 'AR · locked to the surface');
-      this.cb.hint('');
+      const n = this.discovered;
+      this.cb.status('tracking', `AR · ${n} surface${n === 1 ? '' : 's'} discovered`);
+      this.cb.hint(n < 2 ? 'Tap anywhere to call your companion. Look around to reveal more surfaces.' : '');
       return;
     }
     const n = this.pins.length;
@@ -157,6 +198,8 @@ export class XRController {
   }
 
   private readonly onEnd = () => {
+    this.disposeWorld();
+    this.samplers = [];
     this.ar.renderer.setAnimationLoop(null);
     this.ar.renderer.xr.enabled = false;
     this.ar.scene.remove(this.reticle);
@@ -171,10 +214,19 @@ export class XRController {
   };
 
   private readonly onSelect = (e: XRInputSourceEvent) => {
-    if (this.frame || this.pins.length >= 3) return;
     const hit = this.transientHits.get(e.inputSource) ?? this.lastViewerHit;
     const space = this.ar.renderer.xr.getReferenceSpace();
     const pose = hit && space ? hit.getPose(space) : null;
+    if (this.frame) {
+      // Call the companion to the tapped spot.
+      if (!pose) this.cb.toast('No surface found there yet. Look at it for a moment and tap again.', true);
+      else if (this.world) {
+        const m = pose.transform.matrix; // y axis = surface normal
+        this.world.goTo([m[12], m[13], m[14]], [m[4], m[5], m[6]]);
+      }
+      return;
+    }
+    if (this.pins.length >= 3) return;
     if (!hit || !pose) {
       this.cb.toast('No surface found there yet. Move the phone a little and tap again.', true);
       return;
@@ -229,6 +281,66 @@ export class XRController {
     navigator.vibrate?.([20, 40, 20]);
     this.cb.locked();
     this.updateUI();
+    this.spawnCompanion(frame);
+  }
+
+  private async spawnCompanion(frame: QRFrame): Promise<void> {
+    const gen = ++this.worldGeneration;
+    const m = new THREE.Matrix4().fromArray(frame.matrix);
+    const centre = new THREE.Vector3().setFromMatrixPosition(m);
+    // The surface around the code, until mapping finds its real extent.
+    const outline: V2[] = [[-0.8, -0.8], [0.8, -0.8], [0.8, 0.8], [-0.8, 0.8]].map(([x, z]) => {
+      const v = new THREE.Vector3(x, 0, z).applyMatrix4(m);
+      return [v.x, v.z] as V2;
+    });
+    try {
+      const world = await CompanionWorld.create({
+        parent: this.ar.scene,
+        metersPerUnit: 1,
+        height: Math.max(0.08, Math.min(0.3, 0.8 * frame.side)),
+        spawn: [centre.x, centre.y, centre.z],
+        spawnSurface: outline,
+        onDiscovered: (n) => {
+          this.discovered = n;
+          this.updateUI();
+        },
+      });
+      if (gen !== this.worldGeneration) {
+        world.dispose();
+        return;
+      }
+      this.world = world;
+      world.setDebug(this.debug);
+    } catch (e) {
+      this.cb.toast(`Could not load the companion (${e instanceof Error ? e.message : e}).`, true);
+    }
+  }
+
+  /** Feeds what the AR system currently sees into the companion's surface map. */
+  private sense(xrFrame: XRFrame, space: XRReferenceSpace): void {
+    const world = this.world;
+    if (!world) return;
+    for (const src of this.samplers) {
+      const hit = xrFrame.getHitTestResults(src)[0];
+      const pose = hit?.getPose(space);
+      if (!pose) continue;
+      const m = pose.transform.matrix; // column-major; y axis = surface normal
+      world.addHit([m[12], m[13], m[14]], [m[4], m[5], m[6]]);
+    }
+    const planes = xrFrame.detectedPlanes;
+    if (!planes) return;
+    for (const plane of planes) {
+      if (plane.orientation !== 'horizontal' || this.planeTimes.get(plane) === plane.lastChangedTime) continue;
+      const pose = xrFrame.getPose(plane.planeSpace, space);
+      if (!pose) continue;
+      this.planeTimes.set(plane, plane.lastChangedTime);
+      const pm = new THREE.Matrix4().fromArray(pose.transform.matrix);
+      const poly: V2[] = plane.polygon.map((p) => {
+        const v = new THREE.Vector3(p.x, p.y, p.z).applyMatrix4(pm);
+        return [v.x, v.z] as V2;
+      });
+      world.addPlane(plane, pose.transform.position.y, poly);
+    }
   }
 
   private readonly onFrame = (_time: number, xrFrame?: XRFrame) => {
@@ -264,6 +376,11 @@ export class XRController {
         }
       }
     }
-    this.ar.render();
+    if (xrFrame && space && this.world) {
+      this.sense(xrFrame, space);
+      const viewer = xrFrame.getViewerPose(space);
+      if (viewer) this.camPos.set(viewer.transform.position.x, viewer.transform.position.y, viewer.transform.position.z);
+    }
+    this.ar.render((dt) => this.world?.update(dt, this.camPos));
   };
 }

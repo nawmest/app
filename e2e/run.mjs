@@ -88,16 +88,41 @@ async function measure(label) {
 await measure('right after lock');
 await page.screenshot({ path: join(out, '2-locked.png') });
 
-for (const [i, anim] of ['hologram', 'qrwave', 'fountain', 'solar', 'fireworks'].entries()) {
-  await page.click(`.chip[data-id="${anim}"]`);
+await page.waitForFunction(() => window.__tripoint.companion, null, { timeout: 15000 }).catch(() => {});
+check(!!(await app(() => window.__tripoint.companion)), 'companion appears on the virtual code');
+for (let i = 0; i < 5; i++) {
   // Move the camera in small steps per processed frame, independent of the browser's speed.
   for (let k = 0; k < 30; k++) {
     const f0 = await app(() => window.__tripoint.frames);
     await app(() => (window.__fakeCam.state.t += 0.05));
     await page.waitForFunction((f) => window.__tripoint.frames > f, f0);
   }
-  await page.screenshot({ path: join(out, `3-${i}-${anim}.png`) });
-  await measure(`after moving with "${anim}"`);
+  await page.screenshot({ path: join(out, `3-${i}-move.png`) });
+  await measure(`after camera move ${i + 1}`);
+}
+
+// Tap next to the code: the companion walks there.
+{
+  const before = await app(() => window.__tripoint.companion.pos);
+  const q = await page.evaluate(() => {
+    const t = window.__tripoint;
+    const v = t.view;
+    const [pw, ph] = t.processingSize;
+    // Point 1.2 sides to the right of the code centre, via the tracked marker quad.
+    const qd = t.quad;
+    const cx = (qd[0] + qd[2] + qd[4] + qd[6]) / 4;
+    const cy = (qd[1] + qd[3] + qd[5] + qd[7]) / 4;
+    const rx = (qd[2] - qd[0]) * 1.2;
+    const ry = (qd[3] - qd[1]) * 1.2;
+    return [v.left + ((cx + rx) / pw) * v.width, v.top + ((cy + ry) / ph) * v.height];
+  });
+  await app(() => (window.__fakeCam.state.frozen = true));
+  await page.mouse.click(q[0], q[1]);
+  await page.waitForFunction(() => window.__tripoint.companion && !window.__tripoint.companion.goal, null, { timeout: 20000 }).catch(() => {});
+  const after = await app(() => window.__tripoint.companion);
+  const moved = Math.hypot(after.pos[0] - before[0], after.pos[2] - before[2]);
+  check(moved > 0.6 && !after.goal, `tapping beside the code calls the companion over (moved ${moved.toFixed(2)} sides, now ${after.anim})`);
+  await page.screenshot({ path: join(out, '3-companion-called.png') });
 }
 
 // Look away (a different, static scene), then come back to about where the target was lost.

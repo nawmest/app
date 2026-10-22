@@ -1,18 +1,19 @@
 # TriPoint AR
 
-A mobile web app that turns **three points you tap on the live camera image** into a
-**virtual QR code** and plays AR animations anchored on it.
+A mobile web app with a **3D AR companion**. Tap three corners of a square on a surface to place a
+**virtual QR code**, and a little robot appears on it. It wanders around, notices other surfaces
+as your camera finds them (a chair, a shelf, the floor) and jumps over to explore them. Tap any
+surface and it finds a way there, walking and jumping from surface to surface, and waves at you.
 
 A real QR code is located by its three finder patterns (top-left, top-right, bottom-left).
-TriPoint AR uses the same idea, but you place the three "finder patterns" by tapping them on
-any flat, textured surface. The app tracks that patch of the scene in real time, recovers the
-camera pose relative to it, and renders 3D animations standing on the virtual code.
+TriPoint AR uses the same idea, but you place the three "finder patterns" by tapping them on a
+real surface.
 
-| Pin 3 points | Locked: virtual QR + Hologram | QR Wave |
-| --- | --- | --- |
-| ![pinning](docs/pinning.jpg) | ![hologram](docs/hologram.jpg) | ![qr wave](docs/qrwave.jpg) |
+| Appears on the code | Explores a stool | Jumps to the floor | Climbs onto a shelf |
+| --- | --- | --- | --- |
+| ![spawn](docs/companion-spawn.jpg) | ![stool](docs/companion-stool.jpg) | ![jump](docs/companion-jump.jpg) | ![shelf](docs/companion-shelf.jpg) |
 
-<sub>Screenshots from the automated browser test, which uses a synthetic camera.</sub>
+<sub>Screenshots from the automated simulator test (a virtual room; see below).</sub>
 
 ## Two tracking modes
 
@@ -21,8 +22,16 @@ camera pose relative to it, and renders 3D animations standing on the virtual co
   real surfaces, the same approach as three.js's `webxr_ar_hittest` example. Each tap is
   hit-tested against the actual surface, so the three pins are true 3D points. The virtual QR code
   is built from them in world space and held by an XRAnchor. This is the most stable mode.
+  The companion maps surfaces with a fan of hit-test rays and, where the browser offers it, plane
+  detection, so it can travel between all the surfaces the phone has seen.
 * **Camera tracking (iPhone, and everything else).** Safari on iPhone has no WebXR AR, so the app
-  runs its own vision tracker on the camera feed, described under *How it works*.
+  runs its own vision tracker on the camera feed, described under *How it works*. It only knows
+  the one surface the code is on, so there the companion walks to taps on that surface but can't
+  discover others.
+* **Simulator (any device).** **Try the simulator** opens a virtual room (table, books, stool,
+  crate, shelf) with the same flow: place the code, look around by dragging, tap to call the
+  companion. Its "AR system" casts rays from the virtual camera like WebXR hit-tests, so
+  surfaces are discovered only once you have looked at them.
 
 ## Using it
 
@@ -33,20 +42,56 @@ camera pose relative to it, and renders 3D animations standing on the virtual co
    is tilted, so content stands up from it in 3D right away. Each pin is tracked from the strongest
    corner near your tap, and pins you already placed stay glued to the scene while you aim for the
    next one.
-4. When the third pin goes down, the virtual QR code locks on and an animation appears. Pick another
-   one from the bar at the bottom: **Hologram, QR Wave, Fountain, Solar, Fireworks**.
-5. Move around: the content stays put. Moving the phone sideways around the spot measures the
+4. When the third pin goes down, the virtual QR code locks on and the companion appears and waves.
+   Tap anywhere on a surface to call it there: it walks, runs or jumps its way over and waves.
+   If it can't get there, it goes as close as it can and shakes its head.
+5. Look around: each new surface the phone finds lights up with a dot grid when the companion
+   first jumps onto it. Left alone, it wanders and explores reachable surfaces it hasn't been
+   on yet.
+6. Move around: the content stays put. Moving the phone sideways around the spot measures the
    surface's real 3D orientation from parallax (status shows "3D locked"), which also corrects taps
    that were not quite a square. If you look away, the status turns red ("Target lost").
    Point back at the spot and it is found again automatically. **Reset** starts over, **Undo**
-   removes the last pin, **QR base** toggles the virtual code overlay, **Debug** shows tracked points.
+   removes the last pin, **QR base** toggles the virtual code overlay, **Debug** shows tracked points, surface outlines
+   and the companion's planned path.
 
 No camera available (desktop, embedded preview)? The start screen also offers **Record or pick a
-video**, which tracks a clip you film with your phone, and **Try the demo scene**, a synthetic camera
-filming a poster.
+video**, which tracks a clip you film with your phone, and **Try the simulator**.
 
 Tips: pin points that are clearly distinguishable (corners of letters or shapes, not plain areas),
 spread them out, and keep the surface reasonably well lit.
+
+## The companion
+
+```
+surface sensing (WebXR hit-test fan / plane detection / simulator rays)
+   └─► SurfaceMap: horizontal hits grouped by height into convex outlines, merged when they meet
+         └─► navigation: Dijkstra over surfaces; edges = possible jumps
+               (gap to a neighbour, step off an edge onto a lower surface, jump up onto a higher one)
+               └─► CompanionBrain: walk / turn / jump (real ballistic arc) / emote, explore, go to taps
+                     └─► CompanionCharacter: rigged robot, cross-faded clips, head tracks the user
+```
+
+* **Surfaces** (`src/companion/surfaces.ts`): every hit on a horizontal surface joins the surface
+  at the same height whose outline it is close to, or starts a new one. Surfaces need a few hits
+  and some area before the companion trusts them, and a tap on a surface counts as strong
+  evidence. Pieces at floor level (1 m below the phone) always merge into one floor.
+* **Paths** (`src/companion/navigation.ts`): surfaces are graph nodes and possible jumps are edges,
+  limited to what the companion can do relative to its height (up 4×, down 8×, across 4×). The
+  route walks to a take-off point, jumps, and repeats until it reaches the goal. An unreachable
+  goal gives a plan to the closest reachable point.
+* **Behaviour** (`src/companion/brain.ts`): a small action queue (walk, turn, jump, idle, emote).
+  Jumps follow a real parabola under real gravity at the scene's scale. Walking speed matches the
+  walk cycle so the feet don't slide. Idle time is spent wandering, emoting or exploring the
+  nearest reachable undiscovered surface.
+* **Looks** (`src/companion/character.ts`, `surfaceView.ts`): the CC0 *RobotExpressive* model by
+  Quaternius, with cross-faded animations, a head that turns to look at the camera, and a surprised
+  face in the air. There's image-based lighting and a soft shadow, drawn only on the surface the
+  robot stands on (plus where it lands mid-jump). Discovered surfaces get a dot-grid reveal, taps
+  a ripple, and landings a dust ring.
+
+The logic costs about 0.02 ms per frame. Rendering is one skinned character and one 1024² shadow
+map.
 
 ## How it works
 
@@ -63,7 +108,7 @@ camera frame ─► downscale to ≤480px, grayscale ─► Gaussian pyramid (+ 
                 ─► RANSAC homography: code (unit square) ─► image
                 ─► One-Euro smoothing of the 4 projected corners
                 ─► homography decomposition with estimated intrinsics ─► camera pose
-                ─► Three.js camera/anchor ─► animations
+                ─► Three.js camera/anchor ─► companion
 ```
 
 * **Marker definition** (`src/vision/tracker.ts`): the pins define a coordinate frame where
@@ -97,7 +142,16 @@ camera frame ─► downscale to ≤480px, grayscale ─► Gaussian pyramid (+ 
 src/
   main.ts            UI state machine, frame loop, layout, tapping
   camera.ts          getUserMedia + frame grabbing
-  xr.ts              WebXR mode: hit-tested pins, anchored virtual QR code
+  xr.ts              WebXR mode: hit-tested pins, anchored code, surface sensing for the companion
+  sim.ts             simulator: virtual room, ray-based sensing, orbit camera
+  companion/
+    surfaces.ts      surface map from hits and plane polygons
+    navigation.ts    walk + jump path planning across surfaces
+    brain.ts         behaviour: actions, jumps, exploring, going to taps
+    character.ts     robot model, animation blending, head look-at
+    surfaceView.ts   shadows, discovery reveal, tap ripples, debug outlines
+    world.ts         glue between the above
+    geometry2d.ts    convex polygon helpers
   vision/
     image.ts         grayscale, pyramids, gradients, bilinear sampling
     features.ts      Shi-Tomasi corners, tap snapping
@@ -112,7 +166,6 @@ src/
     pose.ts          intrinsics estimate, homography -> pose
     filter.ts        One-Euro filter
     scene.ts         Three.js renderer, anchor, virtual QR base, scan effect
-    animations.ts    Hologram, QR Wave, Fountain, Solar, Fireworks
     textures.ts      procedural textures (QR pattern, glow, shadow)
 ```
 
@@ -125,6 +178,7 @@ npm test           # unit tests: homography, LK, tracker on synthetic sequences,
 npm run build      # production build in dist/
 npm run e2e        # browser test with a synthetic camera (needs `npm run build` and Playwright's Chromium)
 npm run e2e:3d     # 3D accuracy test: WebGL camera orbiting a poster on a table
+npm run e2e:sim    # companion test in the simulator: mapping, exploring, jumps to every surface
 ```
 
 The phone must accept the self-signed certificate warning on first visit. Camera access only

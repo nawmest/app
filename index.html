@@ -25,7 +25,6 @@
     </header>
 
     <footer id="controls" hidden>
-      <div id="animations" class="chips" hidden></div>
       <div class="actions">
         <button id="btn-undo" class="action" type="button">↶ Undo</button>
         <button id="btn-reset" class="action" type="button">⟲ Reset</button>
@@ -44,9 +43,9 @@
         </div>
         <h1>TriPoint AR</h1>
         <p>
-          Point your camera at a flat, textured surface (a poster, a book cover, a patterned table) and
-          <strong>tap 3 corners of a square</strong> lying on it. Like the corner markers of a QR code,
-          they define a <strong>virtual QR code</strong> in 3D that anchors AR animations in place.
+          Point your camera at a flat surface and <strong>tap 3 corners of a square</strong> on it, like
+          the corner markers of a QR code. Your <strong>companion</strong> appears there, explores the
+          surfaces around you and comes to wherever you tap.
         </p>
         <ol>
           <li><b>1</b> top-left corner</li>
@@ -57,7 +56,7 @@
         <button id="btn-start" class="primary" type="button">Start camera</button>
         <div class="alt-sources">
           <button id="btn-video" class="secondary" type="button">Record or pick a video</button>
-          <button id="btn-demo" class="secondary" type="button">Try the demo scene</button>
+          <button id="btn-sim" class="secondary" type="button">Try the simulator</button>
         </div>
         <input id="file-video" type="file" accept="video/*" capture="environment" hidden />
         <p id="intro-error" class="error" hidden></p>

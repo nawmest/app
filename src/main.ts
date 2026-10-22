@@ -1,8 +1,9 @@
 import './style.css';
 import { CameraError, FrameGrabber, startCamera } from './camera';
-import { startDemo, startVideoFile } from './sources';
+import { startVideoFile } from './sources';
+import { Simulator } from './sim';
 import { XRController, xrSupported } from './xr';
-import { ANIMATIONS } from './ar/animations';
+import { CompanionWorld } from './companion/world';
 import { OneEuroFilter } from './ar/filter';
 import { PlaneEstimator } from './ar/plane';
 import { type Intrinsics, type Pose, estimateIntrinsics, poseFromHomography, projectPoint } from './ar/pose';
@@ -13,7 +14,7 @@ import { type Pyramid, buildPyramid } from './vision/image';
 import { trackPoints } from './vision/lk';
 import { PlanarTracker } from './vision/tracker';
 
-type Mode = 'intro' | 'pinning' | 'tracking' | 'xr';
+type Mode = 'intro' | 'pinning' | 'tracking' | 'xr' | 'sim';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const video = $<HTMLVideoElement>('video');
@@ -24,7 +25,6 @@ const statusEl = $('status');
 const statusText = $('status-text');
 const hint = $('hint');
 const toastEl = $('toast');
-const chips = $('animations');
 const btnUndo = $<HTMLButtonElement>('btn-undo');
 const btnReset = $<HTMLButtonElement>('btn-reset');
 const btnBase = $<HTMLButtonElement>('btn-base');
@@ -90,40 +90,40 @@ function updatePinningUI(): void {
   btnUndo.disabled = n === 0;
 }
 
-function buildChips(): void {
-  chips.innerHTML = '';
-  for (const a of ANIMATIONS) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'chip';
-    b.dataset.id = a.id;
-    b.setAttribute('aria-pressed', 'false');
-    b.innerHTML = `<span class="icon">${a.icon}</span><span>${a.label}</span>`;
-    b.addEventListener('click', () => selectAnimation(a.id));
-    chips.appendChild(b);
-  }
+/* ------------------------------------------------------------------ Companion */
+
+let companion: CompanionWorld | null = null;
+/** Bumped on reset so a companion that finishes loading late is discarded. */
+let companionGeneration = 0;
+
+function disposeCompanion(): void {
+  companionGeneration++;
+  companion?.dispose();
+  companion = null;
 }
 
-function selectAnimation(id: string): void {
-  scene?.setAnimation(id);
-  for (const c of chips.querySelectorAll<HTMLButtonElement>('.chip')) {
-    c.setAttribute('aria-pressed', String(c.dataset.id === id));
-  }
+/** Camera tracking: the companion lives in the virtual code's frame (one unit = one side). */
+async function spawnCompanionOnCode(): Promise<void> {
+  if (!scene) return;
+  const gen = ++companionGeneration;
+  const area = 1.6; // walkable area around the code centre, in sides (only this surface is known)
   try {
-    localStorage.setItem('tripoint.animation', id);
-  } catch {
-    /* storage unavailable */
+    const world = await CompanionWorld.create({
+      parent: scene.content,
+      metersPerUnit: 0.2,
+      height: 0.6,
+      spawn: [0, 0, 0],
+      spawnSurface: [[-area, -area], [area, -area], [area, area], [-area, area]],
+    });
+    if (gen !== companionGeneration) {
+      world.dispose();
+      return;
+    }
+    companion = world;
+    companion.setDebug(showDebug);
+  } catch (e) {
+    toast(`Could not load the companion (${e instanceof Error ? e.message : e}).`, true, 5000);
   }
-}
-
-function savedAnimation(): string {
-  try {
-    const id = localStorage.getItem('tripoint.animation');
-    if (id && ANIMATIONS.some((a) => a.id === id)) return id;
-  } catch {
-    /* storage unavailable */
-  }
-  return ANIMATIONS[0].id;
 }
 
 /* ------------------------------------------------------------------ Layout */
@@ -172,8 +172,8 @@ function resetPins(): void {
   plane = null;
   lastPose = null;
   scene?.setPose(null);
+  disposeCompanion();
   mode = 'pinning';
-  chips.hidden = true;
   updatePinningUI();
 }
 
@@ -187,7 +187,7 @@ function undoPin(): void {
     lastPose = null;
     cornerFilter.reset();
     mode = 'pinning';
-    chips.hidden = true;
+    disposeCompanion();
   }
   pins.splice(-2, 2);
   tapOffsets.splice(-2, 2);
@@ -196,6 +196,14 @@ function undoPin(): void {
 }
 
 function onTap(ev: PointerEvent): void {
+  if (mode === 'tracking' && companion && scene) {
+    // Call the companion to the tapped spot on the surface.
+    const ndcX = ((ev.clientX - view.left) / view.width) * 2 - 1;
+    const ndcY = -(((ev.clientY - view.top) / view.height) * 2 - 1);
+    const p = scene.rayToContentPlane(ndcX, ndcY);
+    if (p) companion.goTo([p.x, 0, p.z], [0, 1, 0]);
+    return;
+  }
   if (mode !== 'pinning' || !grabber || !curPyr) return;
   const x = ((ev.clientX - view.left) / view.width) * grabber.width;
   const y = ((ev.clientY - view.top) / view.height) * grabber.height;
@@ -245,10 +253,9 @@ function lock(): void {
   mode = 'tracking';
   cornerFilter.reset();
   smoothH = null;
-  chips.hidden = false;
   btnUndo.disabled = false;
-  if (!scene?.currentAnimation) selectAnimation(savedAnimation());
   scene?.playScan();
+  spawnCompanionOnCode();
   if (navigator.vibrate) navigator.vibrate([20, 40, 20]);
 }
 
@@ -373,7 +380,7 @@ function drawOverlay(): void {
 function loop(time: number): void {
   requestAnimationFrame(loop);
   // In WebXR the session drives rendering (XRController).
-  if (mode === 'intro' || mode === 'xr' || video.readyState < 2) return;
+  if (mode === 'intro' || mode === 'xr' || mode === 'sim' || video.readyState < 2) return;
   // Only process frames the camera actually delivered.
   const key = video.currentTime;
   if (key !== lastFrameKey) {
@@ -381,12 +388,14 @@ function loop(time: number): void {
     processFrame(time);
   }
   drawOverlay();
-  scene?.render();
+  scene?.render((dt) => {
+    if (companion && scene?.contentVisible) companion.update(dt, scene.cameraInContent());
+  });
 }
 
 /* ------------------------------------------------------------------ Boot */
 
-type Source = { kind: 'camera' } | { kind: 'file'; file: File } | { kind: 'demo' };
+type Source = { kind: 'camera' } | { kind: 'file'; file: File };
 
 async function start(source: Source): Promise<void> {
   const btn = $<HTMLButtonElement>('btn-start');
@@ -398,8 +407,7 @@ async function start(source: Source): Promise<void> {
   err.hidden = true;
   try {
     if (source.kind === 'camera') await startCamera(video);
-    else if (source.kind === 'file') await startVideoFile(video, source.file);
-    else await startDemo(video);
+    else await startVideoFile(video, source.file);
   } catch (e) {
     err.textContent = e instanceof CameraError || e instanceof Error ? e.message : String(e);
     if (source.kind === 'camera') err.textContent += ' You can still record or pick a video, or try the demo scene.';
@@ -435,15 +443,10 @@ async function startXR(): Promise<void> {
       status: setStatus,
       hint: setHint,
       toast: (m, warn) => toast(m, warn),
-      locked: () => {
-        chips.hidden = false;
-        if (!scene?.currentAnimation) selectAnimation(savedAnimation());
-        scene?.playScan();
-      },
-      unlocked: () => (chips.hidden = true),
+      locked: () => scene?.playScan(),
+      unlocked: () => {},
       ended: () => {
         mode = 'intro';
-        chips.hidden = true;
         $('hud').hidden = true;
         $('controls').hidden = true;
         $('intro').hidden = false;
@@ -453,8 +456,8 @@ async function startXR(): Promise<void> {
     $('intro').hidden = true;
     $('hud').hidden = false;
     $('controls').hidden = false;
-    btnDebug.hidden = true;
     await xr.start();
+    xr.setDebug(showDebug);
   } catch (e) {
     mode = 'intro';
     $('intro').hidden = false;
@@ -467,10 +470,29 @@ async function startXR(): Promise<void> {
   }
 }
 
+let sim: Simulator | null = null;
+
+function startSim(): void {
+  scene ??= new ARScene(glCanvas);
+  overlay.style.display = 'none';
+  video.style.display = 'none';
+  sim = new Simulator(scene, glCanvas, {
+    status: setStatus,
+    hint: setHint,
+    toast: (m, warn) => toast(m, warn),
+    locked: () => scene?.playScan(),
+  });
+  mode = 'sim';
+  $('intro').hidden = true;
+  $('hud').hidden = false;
+  $('controls').hidden = false;
+  sim.start();
+  sim.setDebug(showDebug);
+}
+
 function init(): void {
-  buildChips();
   $('btn-start').addEventListener('click', () => start({ kind: 'camera' }));
-  $('btn-demo').addEventListener('click', () => start({ kind: 'demo' }));
+  $('btn-sim').addEventListener('click', startSim);
   const fileInput = $<HTMLInputElement>('file-video');
   $('btn-video').addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', () => {
@@ -479,8 +501,8 @@ function init(): void {
     if (file) start({ kind: 'file', file });
   });
   overlay.addEventListener('pointerdown', onTap);
-  btnUndo.addEventListener('click', () => (mode === 'xr' ? xr?.undo() : undoPin()));
-  btnReset.addEventListener('click', () => (mode === 'xr' ? xr?.reset() : resetPins()));
+  btnUndo.addEventListener('click', () => (mode === 'xr' ? xr?.undo() : mode === 'sim' ? sim?.undo() : undoPin()));
+  btnReset.addEventListener('click', () => (mode === 'xr' ? xr?.reset() : mode === 'sim' ? sim?.reset() : resetPins()));
   // Taps on the controls must not also place pins in WebXR.
   $('controls').addEventListener('beforexrselect', (e) => e.preventDefault());
   $('btn-xr').addEventListener('click', startXR);
@@ -502,6 +524,9 @@ function init(): void {
     showDebug = !showDebug;
     btnDebug.classList.toggle('on', showDebug);
     btnDebug.setAttribute('aria-pressed', String(showDebug));
+    companion?.setDebug(showDebug);
+    xr?.setDebug(showDebug);
+    sim?.setDebug(showDebug);
   });
   window.addEventListener('resize', layout);
   video.addEventListener('resize', layout);
@@ -539,6 +564,28 @@ function init(): void {
     },
     get debug() {
       return { features: tracker.cur.length / 2, inliers: tracker.lastInliers, state: tracker.state };
+    },
+    /** Camera tracking: the companion's state in code units. */
+    get companion() {
+      return companion ? { pos: companion.brain.pos.slice(), anim: companion.brain.anim, goal: companion.brain.goal } : null;
+    },
+    /** Simulator: tap a world point and read the companion's state. */
+    sim: {
+      tap: (p: [number, number, number]) => sim?.tapWorld(p),
+      orbit: (azimuth: number, polar: number, distance: number, target?: [number, number, number]) =>
+        sim?.orbitTo(azimuth, polar, distance, target),
+      get companion() {
+        const w = sim?.world;
+        if (!w) return null;
+        return {
+          pos: w.brain.pos.slice(),
+          surfaceY: w.map.get(w.brain.surface)?.y ?? null,
+          anim: w.brain.anim,
+          action: w.brain.action,
+          goal: w.brain.goal,
+          surfaces: w.map.confirmedSurfaces().map((s) => ({ id: s.id, y: +s.y.toFixed(3), discovered: s.discovered })),
+        };
+      },
     },
     get frames() {
       return frameCounter;

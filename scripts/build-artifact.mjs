@@ -11,8 +11,14 @@ const html = await readFile(join(dist, 'index.html'), 'utf8');
 const scriptSrc = html.match(/<script type="module" crossorigin src="\.\/([^"]+)"><\/script>/)?.[1];
 const cssHref = html.match(/<link rel="stylesheet" crossorigin href="\.\/([^"]+)">/)?.[1];
 if (!scriptSrc || !cssHref) throw new Error('Unexpected dist/index.html layout');
-const js = (await readFile(join(dist, scriptSrc), 'utf8')).replace(/<\/script/gi, '<\\/script');
+const jsSource = (await readFile(join(dist, scriptSrc), 'utf8')).replace(/<\/script/gi, '<\\/script');
 const css = await readFile(join(dist, cssHref), 'utf8');
+
+// Embed the companion model so the page needs no extra files.
+const model = (await readFile(join(dist, 'models/RobotExpressive.glb'))).toString('base64');
+const modelRef = /(["'`])\.\/models\/RobotExpressive\.glb\1/g;
+if (!modelRef.test(jsSource)) throw new Error('Model URL not found in the bundle');
+const js = jsSource.replace(modelRef, `"data:model/gltf-binary;base64,${model}"`);
 
 const title = html.match(/<title>.*?<\/title>/)[0];
 const body = html.match(/<body>([\s\S]*?)<\/body>/)[1].replace(/<script[^>]*src=[^>]*><\/script>/g, '').trim();
